@@ -452,6 +452,14 @@ extension MusicKitBridge: WKScriptMessageHandler {
         switch type {
         case "ready":
             isReady = true
+            // `lastError` otherwise never clears once set (e.g. a transient
+            // "MusicKit configure failed" on a bad network moment) — a fresh
+            // `ready` means this configure() attempt succeeded, so whatever
+            // was wrong before no longer applies. Without this, the Account
+            // screen's error banner could get stuck showing a stale failure
+            // forever, including right after a sign-in that actually worked
+            // (dismissAuthPopup() reloads the bridge, which re-fires this).
+            lastError = nil
             readyContinuations.forEach { $0.resume() }
             readyContinuations.removeAll()
 
