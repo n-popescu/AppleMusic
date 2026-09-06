@@ -497,18 +497,38 @@
       return data.map(d => mapSongAttributes(d.id, d.attributes, true));
     },
 
-    fetchPlaylistTracks: async function (id) {
+    // isLibrary picks the right endpoint: a catalog album/playlist (e.g. from
+    // search results) has no /v1/me/library/... resource, so this must not
+    // be hardcoded to the library path the way it used to be.
+    fetchPlaylistTracks: async function (id, isLibrary) {
       const m = requireMusic();
-      const res = await m.api.music(`/v1/me/library/playlists/${id}/tracks`, { limit: 100 });
+      const path = isLibrary
+        ? `/v1/me/library/playlists/${id}/tracks`
+        : `/v1/catalog/${m.storefrontId || 'us'}/playlists/${id}/tracks`;
+      const res = await m.api.music(path, { limit: 100 });
       const data = res.data.data || [];
-      return data.map(d => mapSongAttributes(d.id, d.attributes, true));
+      return data.map(d => mapSongAttributes(d.id, d.attributes, !!isLibrary));
     },
 
-    fetchAlbumTracks: async function (id) {
+    fetchAlbumTracks: async function (id, isLibrary) {
       const m = requireMusic();
-      const res = await m.api.music(`/v1/me/library/albums/${id}/tracks`, { limit: 100 });
+      const path = isLibrary
+        ? `/v1/me/library/albums/${id}/tracks`
+        : `/v1/catalog/${m.storefrontId || 'us'}/albums/${id}/tracks`;
+      const res = await m.api.music(path, { limit: 100 });
       const data = res.data.data || [];
-      return data.map(d => mapSongAttributes(d.id, d.attributes, true));
+      return data.map(d => mapSongAttributes(d.id, d.attributes, !!isLibrary));
+    },
+
+    // Catalog-only: works for any artist ID with the artist's catalog albums.
+    // Library artists (from fetchLibraryArtists) don't carry a usable catalog
+    // ID for this, so this is only wired up from catalog search results.
+    fetchArtistAlbums: async function (id) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/artists/${id}/albums`, { limit: 50 });
+      const data = res.data.data || [];
+      return data.map(d => mapAlbumAttributes(d.id, d.attributes, false));
     },
 
     // ---- Queue (Up Next) ----

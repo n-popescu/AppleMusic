@@ -45,19 +45,49 @@ struct SearchView: View {
 
                         if !store.searchResults.albums.isEmpty {
                             resultSection(title: "Albums") {
-                                horizontalTiles(store.searchResults.albums.map { ($0.id, $0.title, $0.artistName, $0.artwork) })
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(store.searchResults.albums) { album in
+                                            NavigationLink(value: album) {
+                                                TileCard(title: album.title, subtitle: album.artistName, artwork: album.artwork)
+                                                    .frame(width: 140)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
                             }
                         }
 
                         if !store.searchResults.artists.isEmpty {
                             resultSection(title: "Artists") {
-                                horizontalTiles(store.searchResults.artists.map { ($0.id, $0.name, nil, $0.artwork) })
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(store.searchResults.artists) { artist in
+                                            NavigationLink(value: artist) {
+                                                TileCard(title: artist.name, subtitle: nil, artwork: artist.artwork)
+                                                    .frame(width: 140)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
                             }
                         }
 
                         if !store.searchResults.playlists.isEmpty {
                             resultSection(title: "Playlists") {
-                                horizontalTiles(store.searchResults.playlists.map { ($0.id, $0.name, $0.curatorName, $0.artwork) })
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(store.searchResults.playlists) { playlist in
+                                            NavigationLink(value: playlist) {
+                                                TileCard(title: playlist.name, subtitle: playlist.curatorName, artwork: playlist.artwork)
+                                                    .frame(width: 140)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -69,6 +99,15 @@ struct SearchView: View {
             .navigationTitle("Search")
             .searchable(text: $store.searchText, placement: .navigationBarDrawer(displayMode: .always))
             .onChange(of: store.searchText) { _, _ in store.performSearchDebounced() }
+            .navigationDestination(for: Album.self) { album in
+                AlbumDetailView(album: album)
+            }
+            .navigationDestination(for: Playlist.self) { playlist in
+                PlaylistDetailView(playlist: playlist)
+            }
+            .navigationDestination(for: Artist.self) { artist in
+                ArtistDetailView(artist: artist)
+            }
         }
     }
 
@@ -156,14 +195,4 @@ struct SearchView: View {
         }
     }
 
-    private func horizontalTiles(_ items: [(String, String, String?, Artwork?)]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(items, id: \.0) { item in
-                    TileCard(title: item.1, subtitle: item.2, artwork: item.3)
-                        .frame(width: 140)
-                }
-            }
-        }
-    }
 }

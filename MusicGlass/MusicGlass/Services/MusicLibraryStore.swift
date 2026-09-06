@@ -155,7 +155,7 @@ final class MusicLibraryStore: ObservableObject {
 
     func tracks(forPlaylist playlist: Playlist) async -> [Song] {
         do {
-            return try await bridge.fetchPlaylistTracks(id: playlist.id)
+            return try await bridge.fetchPlaylistTracks(id: playlist.id, isLibrary: playlist.playParams?.isLibrary ?? true)
         } catch {
             errorMessage = error.localizedDescription
             return []
@@ -164,7 +164,16 @@ final class MusicLibraryStore: ObservableObject {
 
     func tracks(forAlbum album: Album) async -> [Song] {
         do {
-            return try await bridge.fetchAlbumTracks(id: album.id)
+            return try await bridge.fetchAlbumTracks(id: album.id, isLibrary: album.playParams?.isLibrary ?? true)
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    func albums(forArtist artist: Artist) async -> [Album] {
+        do {
+            return try await bridge.fetchArtistAlbums(id: artist.id)
         } catch {
             errorMessage = error.localizedDescription
             return []

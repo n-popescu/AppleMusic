@@ -291,12 +291,18 @@ final class MusicKitBridge: NSObject, ObservableObject {
         try await call("return await MusicGlassBridge.fetchLibrarySongs();")
     }
 
-    func fetchPlaylistTracks(id: String) async throws -> [Song] {
-        try await call("return await MusicGlassBridge.fetchPlaylistTracks(\(js: id));")
+    func fetchPlaylistTracks(id: String, isLibrary: Bool) async throws -> [Song] {
+        try await call("return await MusicGlassBridge.fetchPlaylistTracks(\(js: id), \(isLibrary));")
     }
 
-    func fetchAlbumTracks(id: String) async throws -> [Song] {
-        try await call("return await MusicGlassBridge.fetchAlbumTracks(\(js: id));")
+    func fetchAlbumTracks(id: String, isLibrary: Bool) async throws -> [Song] {
+        try await call("return await MusicGlassBridge.fetchAlbumTracks(\(js: id), \(isLibrary));")
+    }
+
+    /// Catalog-only — see the JS side for why this doesn't take an
+    /// `isLibrary` flag the way the track fetches above do.
+    func fetchArtistAlbums(id: String) async throws -> [Album] {
+        try await call("return await MusicGlassBridge.fetchArtistAlbums(\(js: id));")
     }
 
     struct SearchResults: Codable {

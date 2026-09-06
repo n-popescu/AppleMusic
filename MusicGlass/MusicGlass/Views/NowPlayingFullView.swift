@@ -8,6 +8,7 @@ struct NowPlayingFullView: View {
     @State private var showQueue = false
     @State private var volumeValue: Double = 1
     @State private var isAdjustingVolume = false
+    @State private var showAddToPlaylistSheet = false
 
     var body: some View {
         let info = store.bridge.nowPlaying
@@ -22,10 +23,25 @@ struct NowPlayingFullView: View {
             Color.black.opacity(0.4).ignoresSafeArea()
 
             VStack(spacing: 28) {
-                Capsule()
-                    .fill(.white.opacity(0.3))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 10)
+                ZStack {
+                    Capsule()
+                        .fill(.white.opacity(0.3))
+                        .frame(width: 40, height: 5)
+
+                    HStack {
+                        Spacer()
+                        Menu {
+                            nowPlayingMenu
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        .disabled(info.catalogID == nil)
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .padding(.top, 10)
 
                 ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: 300, cornerRadius: 24)
                     .shadow(radius: 20)
@@ -158,6 +174,59 @@ struct NowPlayingFullView: View {
             QueueView()
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showAddToPlaylistSheet) {
+            if let song = currentSong {
+                AddToPlaylistSheet(song: song)
+                    .environmentObject(store)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var nowPlayingMenu: some View {
+        // The item MusicKit JS reports as "now playing" during active
+        // playback is always a song (never an album/playlist itself), so
+        // "song" is the right rating/library kind here — same assumption
+        // SongRow's own context menu makes for its rows.
+        if let id = store.bridge.nowPlaying.catalogID {
+            Button {
+                Task { await store.setRating(id: id, kind: "song", value: 1) }
+            } label: {
+                Label("Love", systemImage: "heart")
+            }
+            Button {
+                Task { await store.setRating(id: id, kind: "song", value: -1) }
+            } label: {
+                Label("Dislike", systemImage: "hand.thumbsdown")
+            }
+            Button {
+                Task { await store.addToLibrary(id: id, kind: "song") }
+            } label: {
+                Label("Add to Library", systemImage: "plus.circle")
+            }
+            Button {
+                showAddToPlaylistSheet = true
+            } label: {
+                Label("Add to Playlist…", systemImage: "text.badge.plus")
+            }
+        }
+    }
+
+    /// Builds a `Song` from the bridge's now-playing info, so the same
+    /// `AddToPlaylistSheet` used from library/search rows works here too.
+    private var currentSong: Song? {
+        let info = store.bridge.nowPlaying
+        guard let id = info.catalogID else { return nil }
+        return Song(
+            id: id,
+            title: info.title,
+            artistName: info.artistName,
+            albumName: info.albumName.isEmpty ? nil : info.albumName,
+            durationMillis: Int(info.durationSeconds * 1000),
+            artwork: info.artworkURL.map { Artwork(width: nil, height: nil, url: $0) },
+            releaseDate: nil,
+            playParams: PlayParams(id: id, kind: "song", isLibrary: nil)
+        )
     }
 
     private var repeatIconName: String {
