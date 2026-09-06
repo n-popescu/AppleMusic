@@ -100,6 +100,22 @@ final class MusicLibraryStore: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Runs a fire-and-forget bridge call, clearing any previous
+    /// `errorMessage` first and setting a fresh one only if this attempt
+    /// fails. Without the clear, `errorMessage` — read from both the Library
+    /// and Settings tabs — is a one-way ratchet: a single failed rating tap
+    /// or play attempt would keep showing that same stale error indefinitely
+    /// on whichever screen happens to check it next, long after the actual
+    /// problem (or an unrelated one entirely) resolved.
+    private func perform(_ operation: () async throws -> Void) async {
+        errorMessage = nil
+        do {
+            try await operation()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     // MARK: - Auth
 
     /// Starts the sign-in flow. It doesn't complete synchronously here —
@@ -136,6 +152,7 @@ final class MusicLibraryStore: ObservableObject {
             recentlyPlayed = []
             queue = .empty
             hasLoadedLibraryOnce = false
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -239,117 +256,70 @@ final class MusicLibraryStore: ObservableObject {
 
     func play(song: Song) async {
         guard let params = song.playParams else { return }
-        do {
-            try await bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
     }
 
     func play(album: Album) async {
         guard let params = album.playParams else { return }
-        do {
-            try await bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
     }
 
     func play(playlist: Playlist) async {
         guard let params = playlist.playParams else { return }
-        do {
-            try await bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
     }
 
     func play(station: Station) async {
         guard let params = station.playParams else { return }
-        do {
-            try await bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false) }
     }
 
     // MARK: - Shuffle / Repeat / Volume
 
     func setShuffleMode(_ mode: ShuffleMode) async {
-        do {
-            try await bridge.setShuffleMode(mode)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setShuffleMode(mode) }
     }
 
     func cycleRepeatMode() async {
-        do {
-            try await bridge.setRepeatMode(bridge.repeatMode.next)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setRepeatMode(self.bridge.repeatMode.next) }
     }
 
     func setVolume(_ value: Double) async {
-        do {
-            try await bridge.setVolume(value)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setVolume(value) }
     }
 
     // MARK: - Play Next / Play Later
 
     func playNext(song: Song) async {
         guard let params = song.playParams else { return }
-        do {
-            try await bridge.playNext(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.playNext(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
     }
 
     func playLater(song: Song) async {
         guard let params = song.playParams else { return }
-        do {
-            try await bridge.playLater(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.playLater(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
     }
 
     // MARK: - Ratings (love/dislike) + Add to Library
 
     /// `value` is 1 for love, -1 for dislike; pass the same value again to un-set it.
     func setRating(id: String, kind: String, value: Int) async {
-        do {
-            try await bridge.setRating(id: id, kind: kind, value: value)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.setRating(id: id, kind: kind, value: value) }
     }
 
     func removeRating(id: String, kind: String) async {
-        do {
-            try await bridge.removeRating(id: id, kind: kind)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.removeRating(id: id, kind: kind) }
     }
 
     func addToLibrary(id: String, kind: String) async {
-        do {
-            try await bridge.addToLibrary(id: id, kind: kind)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.addToLibrary(id: id, kind: kind) }
     }
 
     // MARK: - Playlist create/edit
 
     @discardableResult
     func createPlaylist(name: String, description: String? = nil, trackIds: [String] = [], isLibraryTracks: Bool = true) async -> Playlist? {
+        errorMessage = nil
         do {
             let playlist = try await bridge.createPlaylist(name: name, description: description, trackIds: trackIds, isLibrary: isLibraryTracks)
             await refreshLibrary()
@@ -361,11 +331,7 @@ final class MusicLibraryStore: ObservableObject {
     }
 
     func addTrack(_ song: Song, toPlaylist playlist: Playlist) async {
-        do {
-            try await bridge.addTracksToPlaylist(playlistId: playlist.id, trackIds: [song.id], isLibrary: song.playParams?.isLibrary ?? true)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await perform { try await self.bridge.addTracksToPlaylist(playlistId: playlist.id, trackIds: [song.id], isLibrary: song.playParams?.isLibrary ?? true) }
     }
 
     // MARK: - Real recently played history
@@ -436,8 +402,9 @@ final class MusicLibraryStore: ObservableObject {
         }
     }
 
-    /// Fills the search field with a tapped hint and searches immediately,
-    /// bypassing the debounce since the user has already committed to it.
+    /// Fills the search field with a tapped hint; `SearchView`'s
+    /// `.onChange(of: searchText)` picks up the change and searches via the
+    /// normal debounced path.
     func selectSearchHint(_ hint: String) {
         // Just update the text — SearchView's `.onChange(of: searchText)`
         // calls `performSearchDebounced()` for us. This used to also kick
@@ -454,6 +421,7 @@ final class MusicLibraryStore: ObservableObject {
 
     func refreshQueue() async {
         isLoadingQueue = true
+        errorMessage = nil
         defer { isLoadingQueue = false }
         do {
             queue = try await bridge.fetchQueue()
@@ -463,6 +431,7 @@ final class MusicLibraryStore: ObservableObject {
     }
 
     func jumpToQueueItem(at index: Int) async {
+        errorMessage = nil
         do {
             try await bridge.jumpToQueueItem(at: index)
             await refreshQueue()
@@ -486,8 +455,12 @@ final class MusicLibraryStore: ObservableObject {
             try await bridge.moveQueueItem(from: from, to: adjustedDestination)
             await refreshQueue()
         } catch {
-            errorMessage = error.localizedDescription
+            // refreshQueue() clears errorMessage on entry (see its own
+            // comment), so it must run — reconciling the optimistic local
+            // reorder against the bridge's real state — before setting the
+            // message below, not after, or this would immediately wipe it.
             await refreshQueue()
+            errorMessage = error.localizedDescription
         }
     }
 }
