@@ -52,6 +52,32 @@ private func describeFirstInvalidJSONValue(_ value: Any, path: String = "root") 
     return "\(path) is an unsupported type (\(type(of: value)))"
 }
 
+/// Recursively rebuilds a JS-bridged value into one guaranteed safe for
+/// `JSONSerialization`: non-finite numbers become `NSNull`, and every string
+/// is round-tripped through Swift's `String` (which repairs any ill-formed
+/// UTF-16 — an unpaired surrogate — by substituting U+FFFD). The `Any` boxes
+/// `callAsyncJavaScript` hands back can still be the original `NSString`
+/// instances, invalid content and all; casting to `String` alone doesn't
+/// copy/repair that in place, only constructing a *new* Swift `String` does.
+private func sanitizedForJSON(_ value: Any) -> Any {
+    if let number = value as? NSNumber {
+        let double = number.doubleValue
+        if double.isNaN || double.isInfinite { return NSNull() }
+        return number
+    }
+    if value is NSNull { return NSNull() }
+    if let string = value as? String {
+        return String(string)
+    }
+    if let array = value as? [Any] {
+        return array.map { sanitizedForJSON($0) }
+    }
+    if let dict = value as? [String: Any] {
+        return dict.mapValues { sanitizedForJSON($0) }
+    }
+    return value
+}
+
 /// Events pushed asynchronously from MusicKit JS -> native, via `webkit.messageHandlers.musicKitEvent`.
 enum MusicKitEvent {
     case authorizationStatusDidChange(Bool)
@@ -485,13 +511,25 @@ final class MusicKitBridge: NSObject, ObservableObject {
         // funnel through this one function. `isValidJSONObject` performs the
         // same recursive check but reports the result as a plain `Bool`
         // instead of throwing, so it's safe to call first.
-        guard JSONSerialization.isValidJSONObject(result) else {
-            throw MusicKitBridgeError.decodingFailed(describeFirstInvalidJSONValue(result))
-        }
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: result, options: []) else {
-            throw MusicKitBridgeError.decodingFailed()
+        // `isValidJSONObject` only checks *structural* types (NSNumber,
+        // NSString, NSArray, NSDictionary, NSNull, all finite) — it does not
+        // check *string content*. An NSString can legally hold an ill-formed
+        // UTF-16 sequence (an unpaired surrogate), something ordinary real
+        // catalog metadata (foreign-language titles, certain emoji) can
+        // trigger, and `data(withJSONObject:)` then fails on it anyway, via
+        // its normal `error:` outcome rather than an exception this time —
+        // which the `try?` this used to use was silently discarding, hiding
+        // the real reason behind the same generic message every time.
+        // `sanitizedForJSON` repairs this ahead of time by round-tripping
+        // every string through Swift's `String`, which replaces invalid
+        // UTF-16 with U+FFFD, since `NSString`->`Any`->back doesn't do that
+        // automatically the way constructing a fresh Swift `String` does.
+        let sanitized = sanitizedForJSON(result)
+        guard JSONSerialization.isValidJSONObject(sanitized) else {
+            throw MusicKitBridgeError.decodingFailed(describeFirstInvalidJSONValue(sanitized))
         }
         do {
+            let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: [])
             return try JSONDecoder().decode(T.self, from: jsonData)
         } catch {
             throw MusicKitBridgeError.decodingFailed("\(error)")
@@ -600,11 +638,12 @@ extension MusicKitBridge: WKScriptMessageHandler {
             }
 
         case "nowPlayingItemDidChange":
-            // Same NSInvalidArgumentException hazard as `call<T>` below (see
-            // its comment) — a live radio station's `playbackDuration` often
-            // bridges to JS `Infinity`, which `isValidJSONObject` catches
-            // before `data(withJSONObject:)` gets a chance to abort the process.
-            let item = body["item"] ?? [:]
+            // Same hazards as `call<T>` above (see its comments) — a live
+            // radio station's `playbackDuration` can bridge to JS `Infinity`,
+            // and title/artist/album strings are arbitrary real catalog text
+            // that can carry ill-formed UTF-16 — so this goes through the
+            // same sanitize-then-validate path rather than raw `try?`.
+            let item = sanitizedForJSON(body["item"] ?? [:])
             if JSONSerialization.isValidJSONObject(item),
                let data = try? JSONSerialization.data(withJSONObject: item),
                let info = try? JSONDecoder().decode(NowPlayingInfo.self, from: data) {
