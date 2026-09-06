@@ -27,6 +27,23 @@
     }
   };
 
+  // MusicKit JS's authorize() opens the Apple sign-in page via window.open()
+  // and expects that popup to message back via `window.opener.postMessage`
+  // once done. Real WKWebView popups (a separate WKWebView handed back from
+  // WKUIDelegate's createWebViewWith) always have `window.opener === null` —
+  // WebKit isolates them for security — so that handshake silently never
+  // arrives and authorize() hangs forever, even once the popup itself opens
+  // and shows Apple's real sign-in UI. This is a documented limitation of
+  // MusicKit JS inside native WebViews; the workaround (from Apple's own
+  // developer forums) is to hijack window.open and navigate this same
+  // window to the sign-in URL instead of opening a second one. The native
+  // side (MusicKitBridge.swift) watches this window's own navigation to
+  // detect when the sign-in flow has finished and reloads this page fresh.
+  window.open = function (url) {
+    window.location.href = url;
+    return null;
+  };
+
   let music = null;
 
   function attachInstanceListeners(instance) {

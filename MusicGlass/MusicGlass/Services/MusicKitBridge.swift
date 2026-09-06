@@ -46,11 +46,11 @@ final class MusicKitBridge: NSObject, ObservableObject {
     @Published private(set) var volume: Double = 1.0
     @Published var lastError: String?
 
-    /// Non-nil while the Apple Music sign-in popup needs to be shown to the
-    /// person. `MusicKit.authorize()` calls `window.open()` for the real
-    /// music.apple.com login; a hidden WKWebView can't display that itself,
-    /// so we surface *just that popup* as a visible sheet, then dismiss it
-    /// automatically once sign-in completes (the popup calls `window.close()`).
+    /// Non-nil while the Apple Music sign-in flow needs to be shown to the
+    /// person. There's no separate popup webview anymore (see the
+    /// `window.open` override in musickit-bridge.html) — this always points
+    /// at the same engine `webView` below, temporarily made visible in a
+    /// sheet while it navigates through Apple's real sign-in pages.
     @Published var authPresentationWebView: WKWebView?
 
     /// The hidden web view. Add it to the view hierarchy with zero frame / .hidden —
@@ -59,6 +59,23 @@ final class MusicKitBridge: NSObject, ObservableObject {
     let webView: WKWebView
 
     private var readyContinuations: [CheckedContinuation<Void, Never>] = []
+
+    /// Tracks progress through the sign-in flow so `webView(_:didFinish:)` can
+    /// tell "still on Apple's sign-in pages" apart from "just finished/left
+    /// them" using only the navigated-to host — there's no other completion
+    /// signal available once `window.open`'s same-window navigation has torn
+    /// down this page's own JS context (see musickit-bridge.html).
+    private enum SignInFlowState { case idle, inFlow, onSignInHost }
+    private var signInFlowState: SignInFlowState = .idle
+
+    /// Hosts Apple's sign-in flow can navigate through. Best-effort list based
+    /// on Apple ID/iTunes auth infrastructure — if a future flow redirects
+    /// through a host not listed here, `finishSignInFlow()` may fire a step
+    /// early or late; the sheet's manual Cancel/Done buttons cover that case.
+    private static let signInHosts: Set<String> = [
+        "idmsa.apple.com", "appleid.apple.com", "gsa.apple.com",
+        "buy.itunes.apple.com", "signin.apple.com"
+    ]
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -122,13 +139,11 @@ final class MusicKitBridge: NSObject, ObservableObject {
         }
         // Loaded via `loadHTMLString(_:baseURL:)` with a real https:// base
         // rather than `loadFileURL`: a file:// load gives the page a null/
-        // opaque origin, and MusicKit JS's sign-in popup communicates back to
-        // this page via `postMessage` with origin checks that silently fail
-        // against that opaque origin — the popup would open but authorize()
-        // would just hang forever. Using an https base URL (no real network
-        // request happens for the HTML itself, only for the musickit.js
-        // <script src> and the API calls) gives the page a real origin the
-        // postMessage handshake accepts.
+        // opaque origin, which some of MusicKit JS's internal requests and
+        // origin checks reject outright. No real network request happens for
+        // the HTML itself this way — only for the musickit.js <script src>
+        // and the API calls — but the page behaves as if genuinely hosted at
+        // this https URL.
         webView.loadHTMLString(html, baseURL: URL(string: "https://music.apple.com"))
     }
 
@@ -141,20 +156,45 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     // MARK: - Auth
 
-    /// Presents Apple's own music.apple.com sign-in inside the hidden web view.
-    /// This authenticates whichever Apple ID the person types in — independent of
-    /// whatever Apple ID the device itself is signed into for iCloud / Media & Purchases.
+    /// Presents Apple's own sign-in inside the engine web view (made visible
+    /// for the duration of the flow). This authenticates whichever Apple ID
+    /// the person types in — independent of whatever Apple ID the device
+    /// itself is signed into for iCloud / Media & Purchases.
     func authorize() async throws {
-        try await callVoid("await MusicGlassBridge.authorize();")
+        signInFlowState = .inFlow
+        authPresentationWebView = webView
+        do {
+            try await callVoid("await MusicGlassBridge.authorize();")
+        } catch {
+            // Expected: the `window.open` override in musickit-bridge.html
+            // navigates this same WKWebView away from the bridge page as part
+            // of running this call, which tears down the JS context this
+            // `callAsyncJavaScript` invocation was running in and surfaces as
+            // an error here. Harmless — completion is detected via
+            // navigation in `webView(_:didFinish:)` below, not this call's
+            // return value.
+        }
     }
 
     func unauthorize() async throws {
         try await callVoid("await MusicGlassBridge.unauthorize();")
     }
 
-    /// Dismisses the sign-in popup if the person cancels manually.
+    /// Ends the sign-in flow (whether it actually finished or the person hit
+    /// Cancel) and reloads the bridge page fresh: this window's JS context
+    /// was already destroyed the moment it navigated to Apple's sign-in
+    /// pages, so a fresh `MusicKit.configure()` is what picks up the
+    /// resulting session (or lack of one) and reports real auth state again.
     func dismissAuthPopup() {
+        finishSignInFlow()
+    }
+
+    private func finishSignInFlow() {
+        guard signInFlowState != .idle else { return }
+        signInFlowState = .idle
         authPresentationWebView = nil
+        isReady = false
+        loadBridgePage()
     }
 
     // MARK: - Playback controls
@@ -382,32 +422,37 @@ extension MusicKitBridge: WKNavigationDelegate {
     @MainActor func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // The page itself calls back into `musicKitEvent` with `bridgeReady`
         // once MusicKit JS has configured and (if a stored token exists) restored auth.
+        guard signInFlowState != .idle else { return }
+
+        let host = webView.url?.host?.lowercased() ?? ""
+        if Self.signInHosts.contains(where: { host == $0 || host.hasSuffix("." + $0) }) {
+            signInFlowState = .onSignInHost
+        } else if signInFlowState == .onSignInHost {
+            // Navigated away from Apple's sign-in pages after having been on
+            // one — the flow is done (signed in or bounced back after
+            // failure); reload fresh either way so MusicKit JS re-checks.
+            finishSignInFlow()
+        }
     }
 }
 
-// MARK: - WKUIDelegate (surfaces the sign-in popup only)
+// MARK: - WKUIDelegate
 
 extension MusicKitBridge: WKUIDelegate {
+    // `window.open` is overridden in musickit-bridge.html to navigate this
+    // same window instead of opening a real popup (see that file for why —
+    // WKWebView popups always have `window.opener === null`), so
+    // `createWebViewWith` should never actually fire for the sign-in flow
+    // anymore. Left in place only as a harmless fallback in case some other
+    // script path ever calls the real `window.open`.
     @MainActor func webView(_ webView: WKWebView,
                              createWebViewWith configuration: WKWebViewConfiguration,
                              for navigationAction: WKNavigationAction,
                              windowFeatures: WKWindowFeatures) -> WKWebView? {
-        // `MusicKit.authorize()` triggers this via window.open() for the real
-        // Apple sign-in page. Create a *visible* web view using the same
-        // configuration (so it shares session/cookies) and hand it back —
-        // WebKit will drive navigation in it directly.
-        let popup = WKWebView(frame: .zero, configuration: configuration)
-        popup.navigationDelegate = self
-        popup.uiDelegate = self
-        self.authPresentationWebView = popup
-        return popup
-    }
-
-    @MainActor func webViewDidClose(_ webView: WKWebView) {
-        // The auth popup calls window.close() itself once sign-in finishes.
-        if self.authPresentationWebView === webView {
-            self.authPresentationWebView = nil
+        if let url = navigationAction.request.url {
+            webView.load(URLRequest(url: url))
         }
+        return nil
     }
 }
 

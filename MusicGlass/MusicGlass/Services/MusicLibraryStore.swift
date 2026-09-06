@@ -62,7 +62,25 @@ final class MusicLibraryStore: ObservableObject {
     init(bridge: MusicKitBridge? = nil) {
         self.bridge = bridge ?? MusicKitBridge()
         observeNowPlayingForHistory()
+        observeAuthorization()
         Self.current = self
+    }
+
+    /// Sign-in now finishes asynchronously via a bridge-page reload (see
+    /// `MusicKitBridge.authorize()`), so `signIn()` itself has nothing left to
+    /// await — this is what actually kicks off a library/discovery refresh
+    /// once the reload lands and `isAuthorized` flips true.
+    private func observeAuthorization() {
+        bridge.$isAuthorized
+            .removeDuplicates()
+            .sink { [weak self] isAuthorized in
+                guard let self, isAuthorized else { return }
+                Task { @MainActor in
+                    await self.refreshLibrary()
+                    await self.refreshDiscover()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     private func observeNowPlayingForHistory() {
@@ -92,11 +110,16 @@ final class MusicLibraryStore: ObservableObject {
 
     // MARK: - Auth
 
+    /// Starts the sign-in flow. It no longer completes synchronously here —
+    /// `authorize()` triggers a same-window navigation into Apple's sign-in
+    /// pages that tears down the bridge page's JS context, so there's nothing
+    /// meaningful left to await afterward. `observeAuthorization()` (below)
+    /// reactively refreshes the library once the bridge reloads and reports
+    /// `isAuthorized == true`.
     func signIn() async {
         do {
             try await bridge.waitUntilReady()
             try await bridge.authorize()
-            await refreshLibrary()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -117,7 +140,7 @@ final class MusicLibraryStore: ObservableObject {
     // MARK: - Library
 
     func refreshLibrary() async {
-        guard bridge.isAuthorized else { return }
+        guard bridge.isReady, bridge.isAuthorized else { return }
         isLoadingLibrary = true
         errorMessage = nil
         defer {
@@ -343,16 +366,28 @@ final class MusicLibraryStore: ObservableObject {
     // MARK: - Discovery
 
     func refreshDiscover() async {
+        // Wait for the bridge engine rather than bailing out entirely — unlike
+        // `refreshLibrary()`, charts/stations are catalog-level data and
+        // should still show up signed out (matching how the real Apple Music
+        // app behaves); only the personal recommendations call below needs
+        // `isAuthorized`. Calling into the bridge before `isReady` (e.g. right
+        // after cold launch, before MusicKit JS has finished configuring) is
+        // exactly the premature-call class of bug this guards against.
+        await bridge.waitUntilReady()
+
         isLoadingDiscover = true
         defer { isLoadingDiscover = false }
 
-        async let recommendationsResult = bridge.fetchRecommendations()
         async let chartsResult = bridge.fetchCharts()
         async let stationsResult = bridge.fetchStations()
 
-        do {
-            recommendations = try await recommendationsResult
-        } catch { /* leave previous value; discovery sections fail independently */ }
+        if bridge.isAuthorized {
+            do {
+                recommendations = try await bridge.fetchRecommendations()
+            } catch { /* leave previous value; discovery sections fail independently */ }
+        } else {
+            recommendations = []
+        }
         do {
             charts = try await chartsResult
         } catch { /* ditto */ }

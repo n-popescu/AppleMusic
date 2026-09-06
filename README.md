@@ -178,9 +178,32 @@ On first launch:
 - Go to the **Account** tab → **Sign In to Apple Music**.
 - A native-style sheet appears hosting Apple's real sign-in page — log in
   with whichever Apple ID has the subscription you want.
-- The sheet closes itself automatically once sign-in completes.
+- The sheet closes itself automatically once sign-in completes (native code
+  watches which host the sheet's page navigates through and reloads the
+  bridge once it leaves Apple's sign-in hosts — see the caveat below). If it
+  doesn't, a **Done** button in the sheet's toolbar closes it manually.
 - Your Library tab populates with that account's playlists, albums, artists
   and songs.
+
+**Why this isn't a simple popup:** `MusicKit.authorize()` normally opens the
+sign-in page via `window.open()` and expects that popup to message back via
+`window.opener.postMessage()` once done. Real WKWebView popups always have
+`window.opener === null` (WebKit isolates them), so that handshake never
+arrives inside a native app — this is a documented MusicKit JS limitation,
+not a bug in this project alone. The fix here, per Apple's own developer
+forum guidance for MusicKit JS in native WebViews: `musickit-bridge.html`
+overrides `window.open` to navigate the *same* window to the sign-in URL
+instead of opening a second one, and `MusicKitBridge.swift` detects
+completion by watching which host that navigation lands on (a best-effort
+host list — `idmsa.apple.com`, `appleid.apple.com`, etc. — since there's no
+other completion signal once the same-window navigation has torn down the
+bridge page's JS context), then reloads the bridge page fresh so MusicKit JS
+re-initializes and picks up the resulting session. This was built and
+reasoned through without a physical device/Xcode available in the
+environment that wrote it — if the automatic host-detection ever
+mis-fires (dismissing too early/late) on a real device, the sheet's manual
+Cancel/Done buttons are the fallback, and the host list may need adjusting
+based on what a real sign-in flow actually navigates through.
 
 ---
 

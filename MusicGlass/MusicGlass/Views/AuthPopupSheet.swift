@@ -17,6 +17,13 @@ struct AuthPopupSheet: View {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel", action: onDone)
                     }
+                    // Automatic detection (native side watches which Apple
+                    // host this page navigates through) usually dismisses
+                    // this sheet on its own once sign-in finishes. This is a
+                    // manual fallback for the case where it doesn't.
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done", action: onDone)
+                    }
                 }
         }
     }
