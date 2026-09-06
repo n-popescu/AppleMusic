@@ -386,6 +386,22 @@
     skipToPrevious: async function () { await requireMusic().skipToPreviousItem(); },
     seek: async function (seconds) { requireMusic().seekToTime(seconds); },
 
+    // Read synchronously on demand rather than relied on only via the
+    // `playbackTimeDidChange` event above — see MusicKitBridge.swift's
+    // playback-time polling loop for why: that event is driven by an
+    // internal MusicKit JS timer, and WebKit throttles a hidden page's own
+    // JS timers/requestAnimationFrame independently of whether the app
+    // itself is in the foreground, so it can go long stretches without
+    // firing. A one-off call like this one isn't a self-scheduled JS timer,
+    // so it isn't subject to that same throttling.
+    getPlaybackTime: async function () {
+      const m = requireMusic();
+      return {
+        currentTime: (typeof m.currentPlaybackTime === 'number' && isFinite(m.currentPlaybackTime)) ? m.currentPlaybackTime : 0,
+        duration: (typeof m.currentPlaybackDuration === 'number' && isFinite(m.currentPlaybackDuration)) ? m.currentPlaybackDuration : 0
+      };
+    },
+
     // `isLibrary` isn't used here at all — see the comment below for why.
     // It's still accepted (and ignored) so every call site doesn't need to
     // change.

@@ -195,6 +195,33 @@ final class MusicKitBridge: NSObject, ObservableObject {
         if token.isEmpty {
             lastError = "No MusicKit developer token set. Add MusicKitDeveloperToken to Info.plist."
         }
+
+        startPlaybackTimePolling()
+    }
+
+    /// Drives `currentTime`/`duration` from a native timer instead of
+    /// relying solely on the JS-side `playbackTimeDidChange` event. That
+    /// event is driven by an internal MusicKit JS timer, and WebKit
+    /// throttles a hidden page's own JS timers/requestAnimationFrame
+    /// independently of whether the app itself is in the foreground — which
+    /// showed up as the mini/full player's progress only ever updating at a
+    /// discrete state change like pause (driven directly and immediately by
+    /// the native `pause()` call, not a JS timer) rather than continuously
+    /// during playback. A `Task.sleep` loop here is native scheduling, not a
+    /// JS-engine timer, so it isn't subject to that same throttling — each
+    /// tick is a single one-off JS call, not something JS scheduled itself.
+    private func startPlaybackTimePolling() {
+        Task { [weak self] in
+            while let self, !Task.isCancelled {
+                if self.isReady {
+                    if let time = try? await self.fetchPlaybackTime() {
+                        self.currentTime = time.currentTime
+                        self.duration = time.duration
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
     }
 
     // Note: no explicit teardown of the script message handler is needed here.
@@ -272,6 +299,15 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     func seek(to seconds: Double) async throws {
         try await callVoid("await MusicGlassBridge.seek(\(seconds));")
+    }
+
+    private struct PlaybackTime: Decodable {
+        var currentTime: Double
+        var duration: Double
+    }
+
+    private func fetchPlaybackTime() async throws -> PlaybackTime {
+        try await call("return await MusicGlassBridge.getPlaybackTime();")
     }
 
     func togglePlayPause() async throws {
@@ -467,6 +503,21 @@ final class MusicKitBridge: NSObject, ObservableObject {
         guard let data = try? JSONEncoder().encode(value),
               let json = String(data: data, encoding: .utf8) else { return "\"\"" }
         return json
+    }
+
+    // `Any` boxing an `NSNumber` bridged from a JS number does not reliably
+    // cast directly via `as? Double`/`as? Int` — whether it succeeds can
+    // depend on how the underlying NSNumber was constructed (e.g. an
+    // integer-valued JS number bridging to an NSNumber whose declared
+    // Objective-C type isn't a floating-point one), a well-known Swift/
+    // Foundation gotcha. Going through NSNumber's own `doubleValue`/
+    // `intValue` accessors always coerces correctly regardless.
+    private static func doubleValue(_ any: Any?) -> Double? {
+        (any as? NSNumber)?.doubleValue
+    }
+
+    private static func intValue(_ any: Any?) -> Int? {
+        (any as? NSNumber)?.intValue
     }
 
     // MARK: - Keychain-persisted music-user-token (survives app uninstall)
@@ -715,22 +766,22 @@ extension MusicKitBridge: WKScriptMessageHandler {
             }
 
         case "playbackStateDidChange":
-            if let raw = body["state"] as? Int, let status = PlaybackStatus(rawValue: raw) {
+            if let raw = Self.intValue(body["state"]), let status = PlaybackStatus(rawValue: raw) {
                 playbackStatus = status
             }
 
         case "playbackTimeDidChange":
-            currentTime = (body["currentTime"] as? Double) ?? currentTime
-            duration = (body["duration"] as? Double) ?? duration
+            currentTime = Self.doubleValue(body["currentTime"]) ?? currentTime
+            duration = Self.doubleValue(body["duration"]) ?? duration
 
         case "playbackModesDidChange":
-            if let raw = body["shuffleMode"] as? Int, let mode = ShuffleMode(rawValue: raw) {
+            if let raw = Self.intValue(body["shuffleMode"]), let mode = ShuffleMode(rawValue: raw) {
                 shuffleMode = mode
             }
-            if let raw = body["repeatMode"] as? Int, let mode = RepeatMode(rawValue: raw) {
+            if let raw = Self.intValue(body["repeatMode"]), let mode = RepeatMode(rawValue: raw) {
                 repeatMode = mode
             }
-            if let vol = body["volume"] as? Double {
+            if let vol = Self.doubleValue(body["volume"]) {
                 volume = vol
             }
 
