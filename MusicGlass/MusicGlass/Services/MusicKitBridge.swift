@@ -29,6 +29,17 @@ enum MusicKitBridgeError: LocalizedError {
 /// "Couldn't understand the response" into something a bug report can
 /// actually act on, since this project has no way to attach a debugger.
 private func describeFirstInvalidJSONValue(_ value: Any, path: String = "root") -> String? {
+    // `isValidJSONObject` requires specifically an array or dictionary at
+    // the top level — a bare NSNull there (as when a JS call resolves to
+    // `undefined`) is exactly what it rejects, but NSNull is otherwise a
+    // perfectly normal, valid *nested* value. Missing this distinction is
+    // what let this function silently return `nil` while the object it was
+    // asked to explain really was invalid — hiding this project's actual
+    // longest-standing bug (see `call<T>`'s comment) behind a message with
+    // no diagnostic detail at all, for as long as this function existed.
+    if path == "root", value is NSNull {
+        return "root is undefined/null (the JS call resolved with no value)"
+    }
     if let number = value as? NSNumber {
         // NSNumber also boxes Bool; only doubles/floats can be non-finite.
         let double = number.doubleValue
@@ -490,11 +501,26 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     /// Calls an async JS expression that returns Codable JSON, decodes it.
     private func call<T: Decodable>(_ expression: String) async throws -> T {
-        let wrapped = "(async () => { \(expression) })()"
+        // `callAsyncJavaScript` already runs the string it's given as the
+        // *body* of its own async function — top-level `await`/`return`
+        // work directly, no wrapper needed. This used to additionally wrap
+        // `expression` in its own `(async () => { ... })()` IIFE, which is
+        // where every bug in this whole call chain actually traced back to:
+        // that inner IIFE's promise was never awaited or returned by the
+        // *outer* function callAsyncJavaScript generates, so the outer
+        // function always resolved to `undefined` immediately, no matter
+        // what `expression` itself returned. Every T-returning bridge call
+        // (search, library fetches, Discover) was therefore always decoding
+        // a bare `undefined` — which is exactly what crashed
+        // NSJSONSerialization in the first place (a bare top-level NSNull
+        // isn't a valid JSON object) and, after that crash was patched over
+        // with validity checks, is exactly why every one of those checks
+        // kept failing with no useful diagnostic detail (NSNull doesn't
+        // register as "invalid" the way a NaN or malformed string would).
         let result: Any
         do {
             result = try await webView.callAsyncJavaScript(
-                wrapped, arguments: [:], in: nil, contentWorld: .page
+                expression, arguments: [:], in: nil, contentWorld: .page
             ) ?? NSNull()
         } catch {
             throw MusicKitBridgeError.javascriptError(error.localizedDescription)
@@ -538,10 +564,19 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     /// Calls an async JS expression with no meaningful return value.
     private func callVoid(_ expression: String) async throws {
-        let wrapped = "(async () => { \(expression) return null; })()"
+        // Same fix as `call<T>` above — no extra IIFE wrapper needed, and
+        // this one mattered even when the return value itself didn't:
+        // wrapping `expression` in its own un-awaited `(async () => {...})()`
+        // meant a *rejection* inside it (e.g. `MusicGlassBridge.play()`
+        // throwing) was an unhandled rejection inside the page, never
+        // propagated to the outer function — so the `catch` below could
+        // never actually see a failure, and native code moved on before the
+        // JS call had necessarily finished. Passing `expression` directly
+        // makes the outer function actually await it, so both the timing
+        // and error propagation are correct now.
         do {
             _ = try await webView.callAsyncJavaScript(
-                wrapped, arguments: [:], in: nil, contentWorld: .page
+                expression, arguments: [:], in: nil, contentWorld: .page
             )
         } catch {
             throw MusicKitBridgeError.javascriptError(error.localizedDescription)
