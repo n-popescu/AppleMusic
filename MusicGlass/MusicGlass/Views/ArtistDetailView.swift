@@ -58,9 +58,12 @@ struct ArtistDetailView: View {
         }
         .navigationTitle(artist.name)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: Album.self) { album in
-            AlbumDetailView(album: album)
-        }
+        // No .navigationDestination(for: Album.self) here on purpose —
+        // SearchView (the only current entry point to this view) already
+        // registers one on its own NavigationStack. Registering it again on
+        // a pushed child for the same type is redundant and SwiftUI logs a
+        // runtime warning about it (ambiguous destination) even though both
+        // would resolve to the same AlbumDetailView.
         .task { await loadAlbums() }
     }
 
