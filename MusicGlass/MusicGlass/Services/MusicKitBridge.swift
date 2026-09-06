@@ -64,6 +64,14 @@ final class MusicKitBridge: NSObject, ObservableObject {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        // MusicKit JS's `authorize()` opens the sign-in popup via `window.open()`
+        // from inside an async/Promise chain. Script run through
+        // `callAsyncJavaScript` never carries a "user gesture" flag into WebKit
+        // (even though the native button tap that triggered it did), so without
+        // this, WKWebView's popup blocker silently swallows the `window.open()`
+        // call before `WKUIDelegate.createWebViewWith` is ever invoked — the
+        // button just does nothing.
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
         let controller = WKUserContentController()
         config.userContentController = controller
 
