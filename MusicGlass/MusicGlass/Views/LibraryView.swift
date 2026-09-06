@@ -86,6 +86,21 @@ struct LibraryView: View {
                 NewPlaylistSheet()
                     .environmentObject(store)
             }
+            // These must live on the NavigationStack itself, not inside
+            // playlistGrid/albumGrid: those are nested in a LazyVGrid inside
+            // a switch inside a conditionally-shown ScrollView, and
+            // navigationDestination(for:) registered inside a lazy container
+            // or a branch that comes and goes can end up missing or
+            // duplicated as content loads lazily — Apple's docs call this
+            // out explicitly, and on-device (unlike Preview/Simulator this
+            // project couldn't test on) it manifests as a real crash rather
+            // than just a broken link.
+            .navigationDestination(for: Playlist.self) { playlist in
+                PlaylistDetailView(playlist: playlist)
+            }
+            .navigationDestination(for: Album.self) { album in
+                AlbumDetailView(album: album)
+            }
         }
     }
 
@@ -178,9 +193,6 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
             }
         }
-        .navigationDestination(for: Playlist.self) { playlist in
-            PlaylistDetailView(playlist: playlist)
-        }
     }
 
     private var albumGrid: some View {
@@ -191,9 +203,6 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.plain)
             }
-        }
-        .navigationDestination(for: Album.self) { album in
-            AlbumDetailView(album: album)
         }
     }
 
