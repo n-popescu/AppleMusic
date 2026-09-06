@@ -178,32 +178,40 @@ On first launch:
 - Go to the **Account** tab → **Sign In to Apple Music**.
 - A native-style sheet appears hosting Apple's real sign-in page — log in
   with whichever Apple ID has the subscription you want.
-- The sheet closes itself automatically once sign-in completes (native code
-  watches which host the sheet's page navigates through and reloads the
-  bridge once it leaves Apple's sign-in hosts — see the caveat below). If it
-  doesn't, a **Done** button in the sheet's toolbar closes it manually.
-- Your Library tab populates with that account's playlists, albums, artists
-  and songs.
+- **Once you're done, tap Done (or Cancel) in the sheet's toolbar yourself —
+  it does not close itself automatically.** See the caveat below for why.
+- Your Library tab then populates with that account's playlists, albums,
+  artists and songs.
 
-**Why this isn't a simple popup:** `MusicKit.authorize()` normally opens the
+**Why sign-in needs a manual "Done" tap:** `MusicKit.authorize()` opens the
 sign-in page via `window.open()` and expects that popup to message back via
-`window.opener.postMessage()` once done. Real WKWebView popups always have
-`window.opener === null` (WebKit isolates them), so that handshake never
-arrives inside a native app — this is a documented MusicKit JS limitation,
-not a bug in this project alone. The fix here, per Apple's own developer
-forum guidance for MusicKit JS in native WebViews: `musickit-bridge.html`
-overrides `window.open` to navigate the *same* window to the sign-in URL
-instead of opening a second one, and `MusicKitBridge.swift` detects
-completion by watching which host that navigation lands on (a best-effort
-host list — `idmsa.apple.com`, `appleid.apple.com`, etc. — since there's no
-other completion signal once the same-window navigation has torn down the
-bridge page's JS context), then reloads the bridge page fresh so MusicKit JS
-re-initializes and picks up the resulting session. This was built and
-reasoned through without a physical device/Xcode available in the
-environment that wrote it — if the automatic host-detection ever
-mis-fires (dismissing too early/late) on a real device, the sheet's manual
-Cancel/Done buttons are the fallback, and the host list may need adjusting
-based on what a real sign-in flow actually navigates through.
+`window.opener.postMessage()` once done. A real WKWebView popup always has
+`window.opener === null` (WebKit isolates them for security), so that
+handshake never arrives — `authorize()`'s own promise just never resolves,
+even though the popup shows real Apple sign-in UI and login itself works
+fine. This is a documented MusicKit JS limitation in native WebViews, not a
+bug specific to this project.
+
+An earlier version of this fix tried to work around it by overriding
+`window.open` to navigate the *same* window to the sign-in URL instead of
+opening a popup, then guessing when sign-in had finished from which Apple
+host the page had navigated to. That traded one problem for a worse one: it
+destroyed the bridge page's entire JS context the moment it navigated away,
+and the "which host" detection was pure guesswork (never verified against a
+real sign-in flow) that could fire at the wrong moment.
+
+The current approach is simpler and doesn't guess anything: `authorize()`
+fires the JS call without waiting for a response it'll never get, a real
+separate popup opens via the normal `WKUIDelegate` (sharing the engine's
+cookies/session), and the engine's own JS context — and its `music` instance
+— keeps running untouched the whole time. There's no way to detect
+completion from inside the app, so the person taps **Done** once they see
+they've signed in; that reloads the bridge page fresh, and MusicKit JS's own
+`configure()` restores the now-authenticated session from the shared cookie
+store on load, the same way it would for a returning visitor on a real
+website. This was written without a physical device/Xcode available in the
+environment that built it, so the manual tap — not automatic detection — is
+deliberately the *only* thing this relies on.
 
 ---
 

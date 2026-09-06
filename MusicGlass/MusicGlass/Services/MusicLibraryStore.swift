@@ -67,9 +67,9 @@ final class MusicLibraryStore: ObservableObject {
     }
 
     /// Sign-in now finishes asynchronously via a bridge-page reload (see
-    /// `MusicKitBridge.authorize()`), so `signIn()` itself has nothing left to
-    /// await — this is what actually kicks off a library/discovery refresh
-    /// once the reload lands and `isAuthorized` flips true.
+    /// `MusicKitBridge.dismissAuthPopup()`), so `signIn()` itself has nothing
+    /// left to await — this is what actually kicks off a library/discovery
+    /// refresh once the reload lands and `isAuthorized` flips true.
     private func observeAuthorization() {
         bridge.$isAuthorized
             .removeDuplicates()
@@ -110,19 +110,16 @@ final class MusicLibraryStore: ObservableObject {
 
     // MARK: - Auth
 
-    /// Starts the sign-in flow. It no longer completes synchronously here —
-    /// `authorize()` triggers a same-window navigation into Apple's sign-in
-    /// pages that tears down the bridge page's JS context, so there's nothing
-    /// meaningful left to await afterward. `observeAuthorization()` (below)
-    /// reactively refreshes the library once the bridge reloads and reports
+    /// Starts the sign-in flow. It doesn't complete synchronously here —
+    /// `authorize()`'s underlying JS call never resolves (MusicKit JS's
+    /// popup can't message back to this page; see MusicKitBridge.swift), and
+    /// the person dismissing the sign-in sheet is what actually reloads the
+    /// bridge and re-checks auth state. `observeAuthorization()` (below)
+    /// reactively refreshes the library once that reload reports
     /// `isAuthorized == true`.
     func signIn() async {
-        do {
-            try await bridge.waitUntilReady()
-            try await bridge.authorize()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await bridge.waitUntilReady()
+        await bridge.authorize()
     }
 
     func signOut() async {
@@ -366,28 +363,36 @@ final class MusicLibraryStore: ObservableObject {
     // MARK: - Discovery
 
     func refreshDiscover() async {
-        // Wait for the bridge engine rather than bailing out entirely — unlike
-        // `refreshLibrary()`, charts/stations are catalog-level data and
-        // should still show up signed out (matching how the real Apple Music
-        // app behaves); only the personal recommendations call below needs
-        // `isAuthorized`. Calling into the bridge before `isReady` (e.g. right
-        // after cold launch, before MusicKit JS has finished configuring) is
-        // exactly the premature-call class of bug this guards against.
+        // Matches the empty state's own copy ("Sign in to see recommendations")
+        // and `refreshLibrary()`'s existing isAuthorized guard: don't call into
+        // the bridge at all when signed out, full stop. This was reportedly
+        // crashing when Discover was opened right after a cold launch, before
+        // the person had signed in — whatever the exact mechanism, not calling
+        // MusicKit at all pre-auth removes that class of bug entirely.
+        guard bridge.isAuthorized else {
+            recommendations = []
+            charts = .init()
+            stations = []
+            return
+        }
+
+        // Also wait for the engine itself, in case this fires in the brief
+        // window right after `isAuthorized` flips true but before a fresh
+        // `MusicKit.configure()` (e.g. right after the sign-in reload) has
+        // finished — calling in before `isReady` is a premature-call bug
+        // independent of the auth guard above.
         await bridge.waitUntilReady()
 
         isLoadingDiscover = true
         defer { isLoadingDiscover = false }
 
+        async let recommendationsResult = bridge.fetchRecommendations()
         async let chartsResult = bridge.fetchCharts()
         async let stationsResult = bridge.fetchStations()
 
-        if bridge.isAuthorized {
-            do {
-                recommendations = try await bridge.fetchRecommendations()
-            } catch { /* leave previous value; discovery sections fail independently */ }
-        } else {
-            recommendations = []
-        }
+        do {
+            recommendations = try await recommendationsResult
+        } catch { /* leave previous value; discovery sections fail independently */ }
         do {
             charts = try await chartsResult
         } catch { /* ditto */ }
