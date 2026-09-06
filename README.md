@@ -234,6 +234,47 @@ lives in the Xcode project's `MARKETING_VERSION` build setting (`1.0.0`,
 workflow's `tag_name`/`IPA_NAME`/release `name` to cut a new versioned release
 instead of overwriting `v1.0.0`.
 
+### Baking the MusicKit developer token into CI builds
+
+By default the checked-in `Info.plist` ships with a placeholder
+(`PASTE_YOUR_DEVELOPER_TOKEN_HERE`) for `MusicKitDeveloperToken` — fine for
+local Xcode builds where you edit it yourself, but that means every CI-built
+release `.ipa` would ship with a non-functional placeholder unless you also
+paste a real token in before committing (which you should never do — see
+below).
+
+Instead, add your already-generated token as a **GitHub Actions secret** and
+CI injects it at build time, into that ephemeral checkout only — it's never
+written back to the repo:
+
+1. On GitHub: **Settings → Secrets and variables → Actions → New repository
+   secret**.
+2. Name: `MUSICKIT_DEVELOPER_TOKEN`. Value: the full JWT string from step 1
+   above (the long `eyJhbGci...` token, not the `.p8` file itself).
+3. Save. The workflow's "Inject MusicKit developer token from secret" step
+   picks it up automatically on the next run — nothing else to configure. If
+   the secret isn't set, that step is skipped and the build falls back to
+   whatever is in `Info.plist` (the placeholder, by default).
+
+**Never commit a real token to `Info.plist`** — only ever paste it into
+GitHub's Secrets UI, which the workflow reads at build time and masks in logs
+(`::add-mask::`).
+
+**Rotation:** MusicKit developer tokens expire (max ~6 months). This wiring
+does not auto-regenerate the token — when it expires, generate a fresh one
+(step 1 above) and update the `MUSICKIT_DEVELOPER_TOKEN` secret's value; the
+next CI build picks up the new one automatically.
+
+**Public-exposure caveat:** the built `.ipa` is attached to a public GitHub
+Release with this token baked into its `Info.plist`. Anyone who downloads the
+release can extract it and make Apple Music API calls attributed to your
+developer account until it expires. It's a developer token, not a per-user
+credential — it doesn't grant access to any specific user's library or
+personal data (that requires the separate Music User Token generated only
+after someone signs in) — but it's still your account's credential being
+distributed publicly. Only add the secret if you're fine with that trade-off
+for this project.
+
 ---
 
 ## Shuffle, Repeat, Volume

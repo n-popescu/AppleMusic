@@ -45,6 +45,17 @@ jobs:
       - name: Show available SDKs
         run: xcodebuild -showsdks
 
+      - name: Inject MusicKit developer token from secret
+        if: ${{ secrets.MUSICKIT_DEVELOPER_TOKEN != '' }}
+        env:
+          MUSICKIT_DEVELOPER_TOKEN: ${{ secrets.MUSICKIT_DEVELOPER_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$MUSICKIT_DEVELOPER_TOKEN"
+          /usr/libexec/PlistBuddy -c "Set :MusicKitDeveloperToken $MUSICKIT_DEVELOPER_TOKEN" \
+            "MusicGlass/MusicGlass/Resources/Info.plist"
+          echo "MusicKit developer token injected from the MUSICKIT_DEVELOPER_TOKEN secret."
+
       - name: Build & archive (unsigned)
         run: |
           set -euo pipefail
