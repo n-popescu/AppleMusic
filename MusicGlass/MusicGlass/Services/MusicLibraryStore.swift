@@ -62,26 +62,18 @@ final class MusicLibraryStore: ObservableObject {
     init(bridge: MusicKitBridge? = nil) {
         self.bridge = bridge ?? MusicKitBridge()
         observeNowPlayingForHistory()
-        observeAuthorization()
         Self.current = self
     }
 
-    /// Sign-in now finishes asynchronously via a bridge-page reload (see
-    /// `MusicKitBridge.dismissAuthPopup()`), so `signIn()` itself has nothing
-    /// left to await — this is what actually kicks off a library/discovery
-    /// refresh once the reload lands and `isAuthorized` flips true.
-    private func observeAuthorization() {
-        bridge.$isAuthorized
-            .removeDuplicates()
-            .sink { [weak self] isAuthorized in
-                guard let self, isAuthorized else { return }
-                Task { @MainActor in
-                    await self.refreshLibrary()
-                    await self.refreshDiscover()
-                }
-            }
-            .store(in: &cancellables)
-    }
+    // Note: there used to be a reactive `$isAuthorized` subscription here that
+    // auto-triggered `refreshLibrary()`/`refreshDiscover()` the instant
+    // sign-in completed. Removed — it was redundant with `LibraryView` and
+    // `DiscoverView` already refreshing themselves via `.task` when they
+    // appear and are empty, and it fired at the worst possible time: on
+    // every cold launch once a session persists (MusicKit JS restores it
+    // automatically on `configure()`), before any UI navigation even
+    // happens, unconditionally on the launch path rather than lazily when a
+    // tab is actually opened.
 
     private func observeNowPlayingForHistory() {
         bridge.$nowPlaying
@@ -114,9 +106,10 @@ final class MusicLibraryStore: ObservableObject {
     /// `authorize()`'s underlying JS call never resolves (MusicKit JS's
     /// popup can't message back to this page; see MusicKitBridge.swift), and
     /// the person dismissing the sign-in sheet is what actually reloads the
-    /// bridge and re-checks auth state. `observeAuthorization()` (below)
-    /// reactively refreshes the library once that reload reports
-    /// `isAuthorized == true`.
+    /// bridge and re-checks auth state. There's no reactive auto-refresh
+    /// after that — `LibraryView`/`DiscoverView` each refresh themselves via
+    /// `.task` once the person actually opens that tab, which is enough and
+    /// avoids firing an unconditional refresh at every cold launch.
     func signIn() async {
         await bridge.waitUntilReady()
         await bridge.authorize()
