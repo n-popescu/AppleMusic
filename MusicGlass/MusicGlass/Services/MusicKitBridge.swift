@@ -409,10 +409,39 @@ final class MusicKitBridge: NSObject, ObservableObject {
         var albums: [Album] = []
         var artists: [Artist] = []
         var playlists: [Playlist] = []
+        var hasMoreSongs: Bool = false
+        var hasMoreAlbums: Bool = false
+        var hasMoreArtists: Bool = false
+        var hasMorePlaylists: Bool = false
     }
 
     func search(term: String) async throws -> SearchResults {
         try await call("return await MusicGlassBridge.search(\(js: term));")
+    }
+
+    /// One additional page of a single search category, fetched at
+    /// `offset` (the count of that type already shown) — see the JS side's
+    /// `searchMore*` functions for why this isn't just "call search again
+    /// with a bigger limit".
+    struct SearchPage<T: Codable>: Codable {
+        var items: [T] = []
+        var hasMore: Bool = false
+    }
+
+    func searchMoreSongs(term: String, offset: Int) async throws -> SearchPage<Song> {
+        try await call("return await MusicGlassBridge.searchMoreSongs(\(js: term), \(offset));")
+    }
+
+    func searchMoreAlbums(term: String, offset: Int) async throws -> SearchPage<Album> {
+        try await call("return await MusicGlassBridge.searchMoreAlbums(\(js: term), \(offset));")
+    }
+
+    func searchMoreArtists(term: String, offset: Int) async throws -> SearchPage<Artist> {
+        try await call("return await MusicGlassBridge.searchMoreArtists(\(js: term), \(offset));")
+    }
+
+    func searchMorePlaylists(term: String, offset: Int) async throws -> SearchPage<Playlist> {
+        try await call("return await MusicGlassBridge.searchMorePlaylists(\(js: term), \(offset));")
     }
 
     // MARK: - Queue (Up Next)

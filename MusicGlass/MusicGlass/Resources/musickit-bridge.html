@@ -702,6 +702,14 @@
     },
 
     // ---- Search (catalog) ----
+    // Apple's search endpoint caps each category at 25 results per request
+    // (`limit`), same as any other paged endpoint — the first page was all
+    // this ever fetched, so a broad term always looked artificially capped.
+    // Each category's result object independently reports its own `next`
+    // (with its own offset baked in) even from this one combined request, so
+    // that's used here purely as a "is there more" flag; the actual next
+    // page for one category is fetched via the searchMore* functions below,
+    // scoped to just that type, when the person actually scrolls that far.
     search: async function (term) {
       const m = requireMusic();
       const storefront = m.storefrontId || 'us';
@@ -715,7 +723,63 @@
         songs: mapSafely(results.songs ? results.songs.data : [], d => mapSongAttributes(d.id, d.attributes, false), 'search song'),
         albums: mapSafely(results.albums ? results.albums.data : [], d => mapAlbumAttributes(d.id, d.attributes, false), 'search album'),
         artists: mapSafely(results.artists ? results.artists.data : [], d => mapArtistAttributes(d.id, d.attributes), 'search artist'),
-        playlists: mapSafely(results.playlists ? results.playlists.data : [], d => mapPlaylistAttributes(d.id, d.attributes, false), 'search playlist')
+        playlists: mapSafely(results.playlists ? results.playlists.data : [], d => mapPlaylistAttributes(d.id, d.attributes, false), 'search playlist'),
+        hasMoreSongs: !!(results.songs && results.songs.next),
+        hasMoreAlbums: !!(results.albums && results.albums.next),
+        hasMoreArtists: !!(results.artists && results.artists.next),
+        hasMorePlaylists: !!(results.playlists && results.playlists.next)
+      };
+    },
+
+    // Scoped to a single type + explicit offset (the running count of items
+    // already shown), rather than reusing the combined search's own `next`
+    // link — a single-type request is simpler to reason about and matches
+    // how the native side tracks "how many of this type do I have so far".
+    searchMoreSongs: async function (term, offset) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/search`, { term: term, types: 'songs', limit: 25, offset: offset });
+      const results = res.data.results || {};
+      const data = (results.songs && results.songs.data) || [];
+      return {
+        items: mapSafely(data, d => mapSongAttributes(d.id, d.attributes, false), 'search song'),
+        hasMore: !!(results.songs && results.songs.next)
+      };
+    },
+
+    searchMoreAlbums: async function (term, offset) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/search`, { term: term, types: 'albums', limit: 25, offset: offset });
+      const results = res.data.results || {};
+      const data = (results.albums && results.albums.data) || [];
+      return {
+        items: mapSafely(data, d => mapAlbumAttributes(d.id, d.attributes, false), 'search album'),
+        hasMore: !!(results.albums && results.albums.next)
+      };
+    },
+
+    searchMoreArtists: async function (term, offset) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/search`, { term: term, types: 'artists', limit: 25, offset: offset });
+      const results = res.data.results || {};
+      const data = (results.artists && results.artists.data) || [];
+      return {
+        items: mapSafely(data, d => mapArtistAttributes(d.id, d.attributes), 'search artist'),
+        hasMore: !!(results.artists && results.artists.next)
+      };
+    },
+
+    searchMorePlaylists: async function (term, offset) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/search`, { term: term, types: 'playlists', limit: 25, offset: offset });
+      const results = res.data.results || {};
+      const data = (results.playlists && results.playlists.data) || [];
+      return {
+        items: mapSafely(data, d => mapPlaylistAttributes(d.id, d.attributes, false), 'search playlist'),
+        hasMore: !!(results.playlists && results.playlists.next)
       };
     }
   };

@@ -16,6 +16,14 @@ final class MusicLibraryStore: ObservableObject {
     @Published var searchResults: MusicKitBridge.SearchResults = .init()
     @Published var isSearching = false
 
+    /// One flag per search category so scrolling two lists at once (or
+    /// re-triggering the same one before it resolves) can't fire overlapping
+    /// "load more" requests for the same category.
+    @Published var isLoadingMoreSongs = false
+    @Published var isLoadingMoreAlbums = false
+    @Published var isLoadingMoreArtists = false
+    @Published var isLoadingMorePlaylists = false
+
     @Published var isLoadingLibrary = false
     @Published var errorMessage: String?
     @Published var hasLoadedLibraryOnce = false
@@ -249,6 +257,71 @@ final class MusicLibraryStore: ObservableObject {
             if let hints = try? await hintsTask, !Task.isCancelled {
                 searchHints = hints
             }
+        }
+    }
+
+    /// Fetches one more page of search songs (offset = how many are already
+    /// shown) and appends it, for a "load more"/infinite-scroll trigger at
+    /// the end of the results list. A fresh `performSearchDebounced()` call
+    /// (new search text) replaces `searchResults` wholesale, which is what
+    /// naturally resets pagination for a new term.
+    func loadMoreSearchSongs() async {
+        guard searchResults.hasMoreSongs, !isLoadingMoreSongs else { return }
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return }
+        isLoadingMoreSongs = true
+        defer { isLoadingMoreSongs = false }
+        do {
+            let page = try await bridge.searchMoreSongs(term: term, offset: searchResults.songs.count)
+            searchResults.songs.append(contentsOf: page.items)
+            searchResults.hasMoreSongs = page.hasMore
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreSearchAlbums() async {
+        guard searchResults.hasMoreAlbums, !isLoadingMoreAlbums else { return }
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return }
+        isLoadingMoreAlbums = true
+        defer { isLoadingMoreAlbums = false }
+        do {
+            let page = try await bridge.searchMoreAlbums(term: term, offset: searchResults.albums.count)
+            searchResults.albums.append(contentsOf: page.items)
+            searchResults.hasMoreAlbums = page.hasMore
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreSearchArtists() async {
+        guard searchResults.hasMoreArtists, !isLoadingMoreArtists else { return }
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return }
+        isLoadingMoreArtists = true
+        defer { isLoadingMoreArtists = false }
+        do {
+            let page = try await bridge.searchMoreArtists(term: term, offset: searchResults.artists.count)
+            searchResults.artists.append(contentsOf: page.items)
+            searchResults.hasMoreArtists = page.hasMore
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreSearchPlaylists() async {
+        guard searchResults.hasMorePlaylists, !isLoadingMorePlaylists else { return }
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return }
+        isLoadingMorePlaylists = true
+        defer { isLoadingMorePlaylists = false }
+        do {
+            let page = try await bridge.searchMorePlaylists(term: term, offset: searchResults.playlists.count)
+            searchResults.playlists.append(contentsOf: page.items)
+            searchResults.hasMorePlaylists = page.hasMore
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

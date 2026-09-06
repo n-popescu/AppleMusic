@@ -37,6 +37,14 @@ struct SearchView: View {
                                             SongRow(song: song) {
                                                 Task { await store.play(song: song) }
                                             }
+                                            .onAppear {
+                                                if song.id == store.searchResults.songs.last?.id {
+                                                    Task { await store.loadMoreSearchSongs() }
+                                                }
+                                            }
+                                        }
+                                        if store.isLoadingMoreSongs {
+                                            ProgressView().tint(.white).frame(maxWidth: .infinity)
                                         }
                                     }
                                 }
@@ -53,6 +61,14 @@ struct SearchView: View {
                                                     .frame(width: 140)
                                             }
                                             .buttonStyle(.plain)
+                                            .onAppear {
+                                                if album.id == store.searchResults.albums.last?.id {
+                                                    Task { await store.loadMoreSearchAlbums() }
+                                                }
+                                            }
+                                        }
+                                        if store.isLoadingMoreAlbums {
+                                            ProgressView().tint(.white).frame(width: 140)
                                         }
                                     }
                                 }
@@ -69,6 +85,14 @@ struct SearchView: View {
                                                     .frame(width: 140)
                                             }
                                             .buttonStyle(.plain)
+                                            .onAppear {
+                                                if artist.id == store.searchResults.artists.last?.id {
+                                                    Task { await store.loadMoreSearchArtists() }
+                                                }
+                                            }
+                                        }
+                                        if store.isLoadingMoreArtists {
+                                            ProgressView().tint(.white).frame(width: 140)
                                         }
                                     }
                                 }
@@ -85,6 +109,14 @@ struct SearchView: View {
                                                     .frame(width: 140)
                                             }
                                             .buttonStyle(.plain)
+                                            .onAppear {
+                                                if playlist.id == store.searchResults.playlists.last?.id {
+                                                    Task { await store.loadMoreSearchPlaylists() }
+                                                }
+                                            }
+                                        }
+                                        if store.isLoadingMorePlaylists {
+                                            ProgressView().tint(.white).frame(width: 140)
                                         }
                                     }
                                 }
