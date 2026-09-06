@@ -61,6 +61,14 @@ jobs:
       - name: Build & archive (unsigned)
         run: |
           set -euo pipefail
+          # CURRENT_PROJECT_VERSION (-> CFBundleVersion) is overridden to this
+          # run's unique number rather than left at whatever's hardcoded in
+          # the pbxproj. MARKETING_VERSION (1.0.0) never changes between CI
+          # runs, and several sideloading tools (AltStore, Sideloadly) key
+          # "is this already installed" off CFBundleVersion+CFBundleShortVersionString
+          # together — with both identical across every release, they can
+          # silently skip a real reinstall and leave a stale build's crash
+          # (or bug) looking unfixed even after the .ipa itself was rebuilt.
           xcodebuild \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
@@ -72,6 +80,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             clean archive
 
       - name: Package unsigned .ipa from the .xcarchive
@@ -127,10 +136,17 @@ jobs:
           tag_name: v1.0.0
           name: Lucent 1.0.0
           body: |
-            Automated build of Lucent 1.0.0 — **unsigned** `.ipa`, produced with
+            Automated build of Lucent 1.0.0 (build ${{ github.run_number }}, commit
+            ${{ github.sha }}) — **unsigned** `.ipa`, produced with
             `CODE_SIGNING_ALLOWED=NO` (see `.github/workflows/ios-build.yml`).
             There is no signing certificate or provisioning profile involved in
             this build. Resign it locally (`codesign` + your own provisioning
             profile) or run it through a sideloading tool before installing on
             a device.
+
+            If your sideloading tool shows this as "already installed" after a
+            new push, check Settings → General → About → Version on-device: it
+            should show build ${{ github.run_number }}. If it still shows an
+            older build number, force a full uninstall/reinstall rather than
+            an in-place update.
           files: build/output/Lucent-1.0.0-unsigned.ipa

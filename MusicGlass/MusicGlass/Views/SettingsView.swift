@@ -59,11 +59,25 @@ struct SettingsView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
+
+                        Text(versionString)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.35))
                     }
                     .padding(16)
                 }
             }
             .navigationTitle("Account")
         }
+    }
+
+    // CFBundleVersion is stamped per-CI-run (see ios-build.yml), so this is
+    // the quickest way to confirm a rebuilt fix is actually what's installed
+    // — CFBundleShortVersionString alone (1.0.0) never changes between
+    // releases and can't distinguish one build from the next.
+    private var versionString: String {
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "Version \(shortVersion) (build \(build))"
     }
 }
