@@ -78,14 +78,17 @@ struct LibraryView: View {
                     }
                 }
             }
-            .refreshable { await store.refreshLibrary() }
-            // Unconditional now that MusicLibraryStore preloads from its disk
-            // cache at launch: `store.playlists.isEmpty` would otherwise be
-            // false from the very first frame whenever a cache exists, and
-            // this is what actually keeps that cached snapshot in sync with
-            // the account instead of it going stale forever after the first
-            // real launch. `.task` still only fires once per view lifetime,
-            // not on every tab switch, so this isn't a refresh-on-every-tap.
+            // Pull-to-refresh always hits the network, regardless of how
+            // fresh the disk cache is — this is the explicit "I want the
+            // real current state" action.
+            .refreshable { await store.refreshLibrary(force: true) }
+            // Not forced: refreshLibrary() itself now skips the actual
+            // fetch when the disk cache is still fresh (see
+            // MusicLibraryStore.libraryCacheMaxAge), which is what stops
+            // every single launch from re-running the full paginated fetch
+            // regardless of how recently it last succeeded. `.task` still
+            // only fires once per view lifetime, not on every tab switch,
+            // so this isn't a refresh-on-every-tap either way.
             .task {
                 await store.refreshLibrary()
             }

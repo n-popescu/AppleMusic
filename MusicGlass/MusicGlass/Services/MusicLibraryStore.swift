@@ -92,7 +92,18 @@ final class MusicLibraryStore: ObservableObject {
         var albums: [Album]
         var artists: [Artist]
         var songs: [Song]
+        var cachedAt: Date
     }
+
+    /// How long a cached library is trusted before a plain launch/tab-open
+    /// re-fetches it over the network again. Pull-to-refresh always forces a
+    /// real fetch regardless — this only governs the automatic background
+    /// one, which is what made every single launch pay the full paginated
+    /// fetch even though the account's library rarely changes minute to
+    /// minute.
+    private static let libraryCacheMaxAge: TimeInterval = 60 * 60 * 6 // 6 hours
+
+    private var libraryCachedAt: Date?
 
     private static var libraryCacheURL: URL? {
         guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
@@ -107,18 +118,21 @@ final class MusicLibraryStore: ObservableObject {
         albums = cache.albums
         artists = cache.artists
         songs = cache.songs
+        libraryCachedAt = cache.cachedAt
         // Loaded from cache counts as "already loaded" for LibraryView's
         // purposes — it should show this immediately rather than a
-        // full-screen spinner, even though a background refresh is about to
-        // run and may still replace it.
+        // full-screen spinner, even though a background refresh may still
+        // run (if the cache is stale enough) and replace it.
         hasLoadedLibraryOnce = true
     }
 
     private func saveCachedLibrary() {
         guard let url = Self.libraryCacheURL else { return }
-        let cache = LibraryCache(playlists: playlists, albums: albums, artists: artists, songs: songs)
+        let cachedAt = Date()
+        let cache = LibraryCache(playlists: playlists, albums: albums, artists: artists, songs: songs, cachedAt: cachedAt)
         guard let data = try? JSONEncoder().encode(cache) else { return }
         try? data.write(to: url, options: .atomic)
+        libraryCachedAt = cachedAt
     }
 
     /// Sign-out clears the in-memory library state for the account that's
@@ -130,6 +144,7 @@ final class MusicLibraryStore: ObservableObject {
     private func clearCachedLibrary() {
         guard let url = Self.libraryCacheURL else { return }
         try? FileManager.default.removeItem(at: url)
+        libraryCachedAt = nil
     }
 
     // Note: there used to be a reactive `$isAuthorized` subscription here that
@@ -228,8 +243,20 @@ final class MusicLibraryStore: ObservableObject {
 
     // MARK: - Library
 
-    func refreshLibrary() async {
+    /// `force: false` (the default, used by LibraryView's `.task` on every
+    /// launch/tab-open) skips the actual network fetch entirely when the
+    /// disk cache is still fresh (see `libraryCacheMaxAge`) — previously
+    /// every single launch re-ran the full paginated fetch regardless of
+    /// how recently it had last succeeded, which is what made the library
+    /// feel like it "reloaded everything" every time the app was opened.
+    /// `force: true` (pull-to-refresh, the Retry button) always hits the
+    /// network no matter how fresh the cache is.
+    func refreshLibrary(force: Bool = false) async {
         guard bridge.isReady, bridge.isAuthorized else { return }
+        if !force, let cachedAt = libraryCachedAt, Date().timeIntervalSince(cachedAt) < Self.libraryCacheMaxAge {
+            hasLoadedLibraryOnce = true
+            return
+        }
         isLoadingLibrary = true
         errorMessage = nil
         defer {
