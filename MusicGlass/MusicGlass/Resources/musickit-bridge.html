@@ -222,6 +222,21 @@
     };
   }
 
+  // Maps an array item-by-item, skipping (and reporting) any single item
+  // whose mapping function throws instead of letting one malformed entry
+  // reject the whole array. `label` is just for the posted error message.
+  function mapSafely(items, mapFn, label) {
+    const out = [];
+    items.forEach(item => {
+      try {
+        out.push(mapFn(item));
+      } catch (e) {
+        post({ type: 'error', message: 'Skipped a malformed ' + label + ': ' + e.message });
+      }
+    });
+    return out;
+  }
+
   // Client-side fallback used by playNext/playLater when MusicKit JS's own
   // `playNext`/`playLater` aren't available: rebuilds the queue array with
   // the new item spliced in either right after the current track ('next') or
@@ -427,6 +442,20 @@
     },
 
     // ---- Discovery ----
+    //
+    // These three responses are the first real place personal/catalog data
+    // actually flows through `mapAlbumAttributes`/`mapSongAttributes`/etc.
+    // with a signed-in account (fetchLibrary* and search were exercised
+    // earlier in this project's life; fetchRecommendations/fetchCharts/
+    // fetchStations were not, since Discover used to skip calling the bridge
+    // at all while signed out). If a single item's `.attributes` is missing
+    // a field these mapping functions read directly (rather than defensively
+    // with `? :`/`||`), that throws inside `.map()`/`.forEach()` and rejects
+    // the *entire* array for every item, not just the bad one. mapSafely
+    // below isolates each item so one malformed entry can't take out the
+    // whole list — and, as importantly, means a bad item now surfaces as a
+    // 'error' event (visible in the Settings screen's error banner) instead
+    // of an opaque failure with nothing to go on.
     fetchRecommendations: async function () {
       const m = requireMusic();
       const res = await m.api.music('/v1/me/recommendations', { limit: 10 });
@@ -435,10 +464,14 @@
       data.forEach(rec => {
         const contents = (rec.relationships && rec.relationships.contents && rec.relationships.contents.data) || [];
         contents.forEach(c => {
-          if (c.type === 'albums') {
-            items.push({ kind: 'album', album: mapAlbumAttributes(c.id, c.attributes, false), playlist: null });
-          } else if (c.type === 'playlists') {
-            items.push({ kind: 'playlist', album: null, playlist: mapPlaylistAttributes(c.id, c.attributes, false) });
+          try {
+            if (c.type === 'albums') {
+              items.push({ kind: 'album', album: mapAlbumAttributes(c.id, c.attributes, false), playlist: null });
+            } else if (c.type === 'playlists') {
+              items.push({ kind: 'playlist', album: null, playlist: mapPlaylistAttributes(c.id, c.attributes, false) });
+            }
+          } catch (e) {
+            post({ type: 'error', message: 'Skipped a malformed recommendation item: ' + e.message });
           }
         });
       });
@@ -453,8 +486,8 @@
       const songsChart = (results.songs && results.songs[0] && results.songs[0].data) || [];
       const albumsChart = (results.albums && results.albums[0] && results.albums[0].data) || [];
       return {
-        songs: songsChart.map(d => mapSongAttributes(d.id, d.attributes, false)),
-        albums: albumsChart.map(d => mapAlbumAttributes(d.id, d.attributes, false))
+        songs: mapSafely(songsChart, d => mapSongAttributes(d.id, d.attributes, false), 'chart song'),
+        albums: mapSafely(albumsChart, d => mapAlbumAttributes(d.id, d.attributes, false), 'chart album')
       };
     },
 
@@ -463,7 +496,7 @@
       const storefront = m.storefrontId || 'us';
       const res = await m.api.music(`/v1/catalog/${storefront}/stations`, { limit: 20 });
       const data = res.data.data || [];
-      return data.map(d => mapStationAttributes(d.id, d.attributes));
+      return mapSafely(data, d => mapStationAttributes(d.id, d.attributes), 'station');
     },
 
     // ---- Search hints/autocomplete ----
