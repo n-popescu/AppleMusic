@@ -114,7 +114,7 @@
           albumName: item.albumName || (item.attributes && item.attributes.albumName) || '',
           artworkURL: artworkURL,
           durationSeconds: item.playbackDuration || 0,
-          currentTimeSeconds: instance.currentPlaybackTime || 0,
+          currentTimeSeconds: currentPlaybackTime(),
           catalogID: item.id || null
         }
       });
@@ -127,8 +127,8 @@
     instance.addEventListener('playbackTimeDidChange', () => {
       post({
         type: 'playbackTimeDidChange',
-        currentTime: instance.currentPlaybackTime || 0,
-        duration: instance.currentPlaybackDuration || 0
+        currentTime: currentPlaybackTime(),
+        duration: currentPlaybackDuration()
       });
     });
   }
@@ -161,6 +161,27 @@
     } else {
       music.volume = value;
     }
+  }
+
+  // Same version inconsistency as volume above: real-world MusicKit JS usage
+  // (and the community-maintained MusicKit.Player.d.ts) shows
+  // currentPlaybackTime/currentPlaybackDuration living on `music.player`,
+  // not `music` directly — but this file used to read them straight off
+  // `instance`/`m` everywhere, which is `undefined` if that's not actually
+  // where this MusicKit JS release puts them. That's the real reason the
+  // in-app progress bar only ever seemed to update at pause: `undefined || 0`
+  // silently became a constant 0 on every playbackTimeDidChange tick, and
+  // the only genuinely correct-looking update came from wherever else in
+  // the app happened to recompute state around a pause/play transition.
+  function currentPlaybackTime() {
+    if (music.player && typeof music.player.currentPlaybackTime === 'number') return music.player.currentPlaybackTime;
+    if (typeof music.currentPlaybackTime === 'number') return music.currentPlaybackTime;
+    return 0;
+  }
+  function currentPlaybackDuration() {
+    if (music.player && typeof music.player.currentPlaybackDuration === 'number') return music.player.currentPlaybackDuration;
+    if (typeof music.currentPlaybackDuration === 'number') return music.currentPlaybackDuration;
+    return 0;
   }
 
   document.addEventListener('musickitloaded', async () => {
@@ -395,10 +416,12 @@
     // firing. A one-off call like this one isn't a self-scheduled JS timer,
     // so it isn't subject to that same throttling.
     getPlaybackTime: async function () {
-      const m = requireMusic();
+      requireMusic();
+      const t = currentPlaybackTime();
+      const d = currentPlaybackDuration();
       return {
-        currentTime: (typeof m.currentPlaybackTime === 'number' && isFinite(m.currentPlaybackTime)) ? m.currentPlaybackTime : 0,
-        duration: (typeof m.currentPlaybackDuration === 'number' && isFinite(m.currentPlaybackDuration)) ? m.currentPlaybackDuration : 0
+        currentTime: isFinite(t) ? t : 0,
+        duration: isFinite(d) ? d : 0
       };
     },
 
