@@ -115,11 +115,21 @@ final class MusicKitBridge: NSObject, ObservableObject {
     // MARK: - Bootstrapping
 
     private func loadBridgePage() {
-        guard let url = Bundle.main.url(forResource: "musickit-bridge", withExtension: "html") else {
+        guard let url = Bundle.main.url(forResource: "musickit-bridge", withExtension: "html"),
+              let html = try? String(contentsOf: url, encoding: .utf8) else {
             lastError = "musickit-bridge.html is missing from the app bundle."
             return
         }
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        // Loaded via `loadHTMLString(_:baseURL:)` with a real https:// base
+        // rather than `loadFileURL`: a file:// load gives the page a null/
+        // opaque origin, and MusicKit JS's sign-in popup communicates back to
+        // this page via `postMessage` with origin checks that silently fail
+        // against that opaque origin — the popup would open but authorize()
+        // would just hang forever. Using an https base URL (no real network
+        // request happens for the HTML itself, only for the musickit.js
+        // <script src> and the API calls) gives the page a real origin the
+        // postMessage handshake accepts.
+        webView.loadHTMLString(html, baseURL: URL(string: "https://music.apple.com"))
     }
 
     func waitUntilReady() async {
