@@ -25,6 +25,7 @@
 		B8DED8B4FB7242519EF9981A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC93FD9930FB4ED38972838D /* SettingsView.swift */; };
 		31D08A4D044445BFBB65E042 /* SongRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E85C816B4BF46E7BB9DFC9E /* SongRow.swift */; };
 		48E89310837D4B8B8CF48880 /* musickit-bridge.html in Resources */ = {isa = PBXBuildFile; fileRef = 61492DBE2832478788D6351A /* musickit-bridge.html */; };
+		4F5748DC56C3410CA25D1343 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E31B8899C545477488893A81 /* Assets.xcassets */; };
 		B9790AB5E830422BBAA2E236 /* AirPlayButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD7661444AF484593402647 /* AirPlayButton.swift */; };
 		DAB0BCF27DD8429F8CFDFEF0 /* DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6974F46775A4B2882312546 /* DiscoverView.swift */; };
 		A6EC2D1218E44DA6983DB63C /* MusicGlassActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0919727F252A43D09B9F26FE /* MusicGlassActivityAttributes.swift */; };
@@ -52,6 +53,7 @@
 		FC93FD9930FB4ED38972838D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3E85C816B4BF46E7BB9DFC9E /* SongRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongRow.swift; sourceTree = "<group>"; };
 		61492DBE2832478788D6351A /* musickit-bridge.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = musickit-bridge.html; sourceTree = "<group>"; };
+		E31B8899C545477488893A81 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6AD7661444AF484593402647 /* AirPlayButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayButton.swift; sourceTree = "<group>"; };
 		69AFD26AE65941DFBC4315B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		19777773E2494FA983888517 /* MusicGlass.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicGlass.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -136,6 +138,7 @@
 			children = (
 				61492DBE2832478788D6351A /* musickit-bridge.html */,
 				69AFD26AE65941DFBC4315B6 /* Info.plist */,
+				E31B8899C545477488893A81 /* Assets.xcassets */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -228,6 +231,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				48E89310837D4B8B8CF48880 /* musickit-bridge.html in Resources */,
+				4F5748DC56C3410CA25D1343 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -386,6 +390,8 @@
 		F101B3A846F04EE49A71E59F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -397,7 +403,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.musicglass.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -408,6 +414,8 @@
 		E4800D42D88C41AFBB9C2CF9 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -419,7 +427,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.musicglass.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucent.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;

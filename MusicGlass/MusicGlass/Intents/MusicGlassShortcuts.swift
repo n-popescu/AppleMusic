@@ -1,6 +1,6 @@
 import AppIntents
 
-/// Registers MusicGlass's App Intents as Siri phrases / Shortcuts app
+/// Registers Lucent's App Intents as Siri phrases / Shortcuts app
 /// entries. No Shortcuts/Siri Intents extension target is needed for this —
 /// `AppIntents` works declared directly in the main app target on iOS 16+.
 struct MusicGlassShortcuts: AppShortcutsProvider {

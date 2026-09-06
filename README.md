@@ -1,4 +1,12 @@
-# MusicGlass
+# Lucent
+
+> **Note on naming:** the app is called **Lucent**, but the Xcode project
+> file, scheme, build target, and Swift module underneath it are
+> intentionally still named `MusicGlass` — that's the app's original working
+> name, kept internally for build stability (renaming a hand-authored
+> `.xcodeproj`/target/module carries real risk of silently breaking CI for no
+> user-visible benefit). If `MusicGlass.xcodeproj` doesn't match the name
+> shown on the Home Screen, this is why — see "Open / build in Xcode" below.
 
 A native SwiftUI iPhone app with a real Liquid Glass UI, playing Apple Music
 through **MusicKit JS running inside a hidden `WKWebView`** instead of the
@@ -57,7 +65,8 @@ AppleMusic/                              repo root
         │   └── MusicGlassShortcuts.swift    AppShortcutsProvider registering both
         └── Resources/
             ├── musickit-bridge.html         loads MusicKit JS, exposes window.MusicGlassBridge
-            └── Info.plist
+            ├── Info.plist
+            └── Assets.xcassets/             App Icon + AccentColor (pink) asset catalog
 ```
 
 **Data flow:** SwiftUI views call methods on `MusicLibraryStore`, which calls
@@ -133,7 +142,7 @@ was written directly rather than exported from Xcode). It:
 
 - Targets **iOS 17.0+** (chosen so `#available(iOS 26.0, *)` in
   `GlassComponents.swift` has a meaningful fallback path to fall back *from*).
-- Uses bundle identifier **`com.musicglass.app`**.
+- Uses bundle identifier **`com.lucent.app`**.
 - Includes every file under `App/`, `Models/`, `Services/`, `Views/` in the
   target's Sources build phase, and `Resources/musickit-bridge.html` in the
   Resources (Copy Bundle Resources) build phase.
@@ -285,7 +294,7 @@ the debounce.
 
 ## Siri / Shortcuts (App Intents)
 
-`Intents/PlayMediaIntent.swift` ("Play [name] in MusicGlass" — resolves
+`Intents/PlayMediaIntent.swift` ("Play [name] in Lucent" — resolves
 against library playlists/albums by name) and
 `Intents/TogglePlaybackIntent.swift` ("Play/Pause") are plain `AppIntent`s
 living directly in the main app target — no separate Intents extension
@@ -325,8 +334,8 @@ What *is* done, so the extension is a drop-in away from working:
 **To finish wiring it up in Xcode:**
 1. File → New → Target… → **Widget Extension**. Check **"Include Live
    Activity"**. Name it (e.g. `MusicGlassWidget`); Xcode will suggest a
-   bundle id like `com.musicglass.app.MusicGlassWidget` — that's fine as a
-   suffix of the main app's `com.musicglass.app`.
+   bundle id like `com.lucent.app.MusicGlassWidget` — that's fine as a
+   suffix of the main app's `com.lucent.app`.
 2. Give `Models/MusicGlassActivityAttributes.swift` **Target Membership** in
    both the main app target and the new widget extension target (File
    Inspector → Target Membership, check both boxes) so

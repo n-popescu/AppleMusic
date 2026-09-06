@@ -1,6 +1,6 @@
 import AppIntents
 
-/// "Play [playlist/album name] in MusicGlass" — resolves against whatever's
+/// "Play [playlist/album name] in Lucent" — resolves against whatever's
 /// already loaded in `MusicLibraryStore` (falling back to a fresh library
 /// fetch if nothing has loaded yet), then starts playback the same way a tap
 /// on a `TileCard` would.
@@ -12,22 +12,22 @@ import AppIntents
 /// store yet and the intent reports that back via its dialog rather than
 /// crashing.
 struct PlayMediaIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play in MusicGlass"
+    static var title: LocalizedStringResource = "Play in Lucent"
     static var description = IntentDescription(
-        "Plays a playlist or album from your MusicGlass library by name."
+        "Plays a playlist or album from your Lucent library by name."
     )
 
     @Parameter(title: "Playlist or Album Name")
     var mediaName: String
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Play \(\.$mediaName) in MusicGlass")
+        Summary("Play \(\.$mediaName) in Lucent")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let store = MusicLibraryStore.current else {
-            return .result(dialog: "Open MusicGlass at least once, then try again.")
+            return .result(dialog: "Open Lucent at least once, then try again.")
         }
 
         let query = mediaName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -48,6 +48,6 @@ struct PlayMediaIntent: AppIntent {
             await store.play(album: album)
             return .result(dialog: "Playing \(album.title).")
         }
-        return .result(dialog: "Couldn't find \"\(query)\" in your MusicGlass library.")
+        return .result(dialog: "Couldn't find \"\(query)\" in your Lucent library.")
     }
 }

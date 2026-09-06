@@ -12,6 +12,8 @@
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Lucent</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -30,7 +32,7 @@
     </array>
 
     <key>NSAppleMusicUsageDescription</key>
-    <string>MusicGlass plays music from your Apple Music account.</string>
+    <string>Lucent plays music from your Apple Music account.</string>
 
     <key>UIBackgroundModes</key>
     <array>
