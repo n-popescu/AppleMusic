@@ -79,8 +79,15 @@ struct LibraryView: View {
                 }
             }
             .refreshable { await store.refreshLibrary() }
+            // Unconditional now that MusicLibraryStore preloads from its disk
+            // cache at launch: `store.playlists.isEmpty` would otherwise be
+            // false from the very first frame whenever a cache exists, and
+            // this is what actually keeps that cached snapshot in sync with
+            // the account instead of it going stale forever after the first
+            // real launch. `.task` still only fires once per view lifetime,
+            // not on every tab switch, so this isn't a refresh-on-every-tap.
             .task {
-                if store.playlists.isEmpty { await store.refreshLibrary() }
+                await store.refreshLibrary()
             }
             .sheet(isPresented: $showNewPlaylistSheet) {
                 NewPlaylistSheet()

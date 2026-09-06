@@ -71,6 +71,65 @@ final class MusicLibraryStore: ObservableObject {
         self.bridge = bridge ?? MusicKitBridge()
         observeNowPlayingForHistory()
         Self.current = self
+        loadCachedLibrary()
+    }
+
+    // MARK: - Library disk cache
+    //
+    // fetchLibraryPlaylists/Albums/Artists/Songs now paginate through a
+    // person's *entire* library (see musickit-bridge.html's fetchAllPages) —
+    // correct, since the old single-page fetch silently truncated anyone
+    // with a large library, but for the same reason it can take 30+ seconds
+    // from a cold launch with nothing cached yet to fall back on while that
+    // runs. Caching the last successful fetch to disk and loading it
+    // synchronously at launch means the Library tab has *something* to show
+    // immediately; refreshLibrary() still runs in the background afterward
+    // (see LibraryView's `.task`) to bring it back in sync with the account,
+    // it just no longer blocks the first paint.
+
+    private struct LibraryCache: Codable {
+        var playlists: [Playlist]
+        var albums: [Album]
+        var artists: [Artist]
+        var songs: [Song]
+    }
+
+    private static var libraryCacheURL: URL? {
+        guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        return dir.appendingPathComponent("library-cache.json")
+    }
+
+    private func loadCachedLibrary() {
+        guard let url = Self.libraryCacheURL,
+              let data = try? Data(contentsOf: url),
+              let cache = try? JSONDecoder().decode(LibraryCache.self, from: data) else { return }
+        playlists = cache.playlists
+        albums = cache.albums
+        artists = cache.artists
+        songs = cache.songs
+        // Loaded from cache counts as "already loaded" for LibraryView's
+        // purposes — it should show this immediately rather than a
+        // full-screen spinner, even though a background refresh is about to
+        // run and may still replace it.
+        hasLoadedLibraryOnce = true
+    }
+
+    private func saveCachedLibrary() {
+        guard let url = Self.libraryCacheURL else { return }
+        let cache = LibraryCache(playlists: playlists, albums: albums, artists: artists, songs: songs)
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// Sign-out clears the in-memory library state for the account that's
+    /// leaving, but leaves the file on disk untouched — this deletes it too,
+    /// since otherwise the *next* account to sign in would flash the
+    /// previous account's cached playlists for a moment before its own
+    /// refreshLibrary() finishes, which is exactly the cross-account data
+    /// leak this app has otherwise been careful to avoid elsewhere.
+    private func clearCachedLibrary() {
+        guard let url = Self.libraryCacheURL else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     // Note: there used to be a reactive `$isAuthorized` subscription here that
@@ -161,6 +220,7 @@ final class MusicLibraryStore: ObservableObject {
             queue = .empty
             hasLoadedLibraryOnce = false
             errorMessage = nil
+            clearCachedLibrary()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -187,6 +247,7 @@ final class MusicLibraryStore: ObservableObject {
             albums = try await albumsResult
             artists = try await artistsResult
             songs = try await songsResult
+            saveCachedLibrary()
         } catch {
             errorMessage = error.localizedDescription
         }
