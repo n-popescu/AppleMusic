@@ -9,6 +9,10 @@ struct SearchView: View {
                 Color.clear.glassBackdrop()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        if !store.searchHints.isEmpty {
+                            searchHintsRow
+                        }
+
                         if store.isSearching {
                             ProgressView().tint(.white).padding(.top, 40)
                         } else if let error = store.errorMessage, hasNoResults {
@@ -65,6 +69,26 @@ struct SearchView: View {
             .navigationTitle("Search")
             .searchable(text: $store.searchText, placement: .navigationBarDrawer(displayMode: .always))
             .onChange(of: store.searchText) { _, _ in store.performSearchDebounced() }
+        }
+    }
+
+    private var searchHintsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(store.searchHints, id: \.self) { hint in
+                    Button {
+                        store.selectSearchHint(hint)
+                    } label: {
+                        Label(hint, systemImage: "magnifyingglass")
+                            .font(.system(size: 13, weight: .medium))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .background { GlassSurface(cornerRadius: 14) { Color.clear } }
+                    .foregroundStyle(.white.opacity(0.85))
+                }
+            }
         }
     }
 

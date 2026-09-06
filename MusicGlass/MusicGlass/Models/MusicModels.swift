@@ -188,6 +188,70 @@ struct QueueSnapshot: Codable, Equatable {
     static let empty = QueueSnapshot(position: -1, items: [])
 }
 
+// MARK: - Shuffle / Repeat
+
+/// Mirrors MusicKit JS's `PlayerShuffleMode` (`music.shuffleMode`): 0 = off, 1 = songs.
+enum ShuffleMode: Int, Codable {
+    case off = 0
+    case songs = 1
+}
+
+/// Mirrors MusicKit JS's `PlayerRepeatMode` (`music.repeatMode`): 0 = off, 1 = one, 2 = all.
+enum RepeatMode: Int, Codable {
+    case off = 0
+    case one = 1
+    case all = 2
+
+    /// Cycles off -> all -> one -> off, matching the order requested for the UI toggle.
+    var next: RepeatMode {
+        switch self {
+        case .off: return .all
+        case .all: return .one
+        case .one: return .off
+        }
+    }
+}
+
+// MARK: - Station (radio)
+
+struct Station: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let artwork: Artwork?
+    let isLive: Bool?
+    let playParams: PlayParams?
+}
+
+// MARK: - Discovery: charts + recommendations
+
+struct ChartsResult: Codable {
+    var songs: [Song] = []
+    var albums: [Album] = []
+}
+
+/// A single "Listen Now" style recommendation. Apple's `/v1/me/recommendations`
+/// resources bundle several album/playlist recommendations inside one
+/// recommendation resource's `relationships.contents` — the bridge flattens
+/// that into one of these per content item.
+struct RecommendationItem: Codable, Identifiable {
+    let kind: String // "album" or "playlist"
+    let album: Album?
+    let playlist: Playlist?
+
+    var id: String { album?.id ?? playlist?.id ?? UUID().uuidString }
+}
+
+/// One entry from Apple's real `/v1/me/recent/played` history, which can be a
+/// song, album, or playlist (MusicKit JS surfaces all three there).
+struct RecentlyPlayedItem: Codable, Identifiable {
+    let kind: String // "song", "album", or "playlist"
+    let song: Song?
+    let album: Album?
+    let playlist: Playlist?
+
+    var id: String { song?.id ?? album?.id ?? playlist?.id ?? UUID().uuidString }
+}
+
 // MARK: - Generic Apple Music API envelope
 
 struct MusicAPIResponse<T: Codable>: Codable {

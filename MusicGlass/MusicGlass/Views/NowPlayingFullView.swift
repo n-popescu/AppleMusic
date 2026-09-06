@@ -6,6 +6,8 @@ struct NowPlayingFullView: View {
     @State private var scrubberValue: Double = 0
     @State private var isScrubbing = false
     @State private var showQueue = false
+    @State private var volumeValue: Double = 1
+    @State private var isAdjustingVolume = false
 
     var body: some View {
         let info = store.bridge.nowPlaying
@@ -65,7 +67,16 @@ struct NowPlayingFullView: View {
                 }
                 .padding(.horizontal, 24)
 
-                HStack(spacing: 36) {
+                HStack(spacing: 28) {
+                    Button {
+                        Task { await store.setShuffleMode(store.bridge.shuffleMode == .off ? .songs : .off) }
+                    } label: {
+                        Image(systemName: "shuffle")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? .pink : nil))
+                    .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
+
                     Button { Task { try? await store.bridge.skipToPrevious() } } label: {
                         Image(systemName: "backward.fill").font(.system(size: 22))
                     }
@@ -81,8 +92,41 @@ struct NowPlayingFullView: View {
                         Image(systemName: "forward.fill").font(.system(size: 22))
                     }
                     .buttonStyle(GlassButtonStyle())
+
+                    Button {
+                        Task { await store.cycleRepeatMode() }
+                    } label: {
+                        Image(systemName: repeatIconName)
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .buttonStyle(GlassButtonStyle(tint: store.bridge.repeatMode == .off ? nil : .pink))
+                    .foregroundStyle(store.bridge.repeatMode == .off ? .white.opacity(0.6) : .white)
                 }
                 .foregroundStyle(.white)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "speaker.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Slider(
+                        value: Binding(
+                            get: { isAdjustingVolume ? volumeValue : store.bridge.volume },
+                            set: { volumeValue = $0 }
+                        ),
+                        in: 0...1,
+                        onEditingChanged: { editing in
+                            isAdjustingVolume = editing
+                            if !editing {
+                                Task { await store.setVolume(volumeValue) }
+                            }
+                        }
+                    )
+                    .tint(.white)
+                    Image(systemName: "speaker.wave.3.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(.horizontal, 24)
 
                 HStack(spacing: 16) {
                     Button {
@@ -113,6 +157,13 @@ struct NowPlayingFullView: View {
         .sheet(isPresented: $showQueue) {
             QueueView()
                 .environmentObject(store)
+        }
+    }
+
+    private var repeatIconName: String {
+        switch store.bridge.repeatMode {
+        case .off, .all: return "repeat"
+        case .one: return "repeat.1"
         }
     }
 

@@ -41,6 +41,9 @@ final class MusicKitBridge: NSObject, ObservableObject {
     @Published private(set) var playbackStatus: PlaybackStatus = .none
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
+    @Published private(set) var shuffleMode: ShuffleMode = .off
+    @Published private(set) var repeatMode: RepeatMode = .off
+    @Published private(set) var volume: Double = 1.0
     @Published var lastError: String?
 
     /// Non-nil while the Apple Music sign-in popup needs to be shown to the
@@ -155,10 +158,89 @@ final class MusicKitBridge: NSObject, ObservableObject {
         }
     }
 
-    /// Sets the playback queue from a catalog or library item (song, album or playlist) and starts playing.
+    /// Sets the playback queue from a catalog or library item (song, album, playlist or station) and starts playing.
     func setQueueAndPlay(id: String, kind: String, isLibrary: Bool) async throws {
         let js = "await MusicGlassBridge.setQueueAndPlay(\(js: id), \(js: kind), \(isLibrary));"
         try await callVoid(js)
+    }
+
+    // MARK: - Shuffle / Repeat / Volume
+
+    func setShuffleMode(_ mode: ShuffleMode) async throws {
+        try await callVoid("await MusicGlassBridge.setShuffleMode(\(mode.rawValue));")
+    }
+
+    func setRepeatMode(_ mode: RepeatMode) async throws {
+        try await callVoid("await MusicGlassBridge.setRepeatMode(\(mode.rawValue));")
+    }
+
+    func setVolume(_ value: Double) async throws {
+        try await callVoid("await MusicGlassBridge.setVolume(\(value));")
+    }
+
+    /// Best-effort insert into the live queue right after the currently playing
+    /// item. MusicKit JS's documented `music.playNext(descriptor)` is used when
+    /// present; if it's unavailable in the loaded MusicKit JS release, the
+    /// bridge falls back to rebuilding the queue client-side (same caveat as
+    /// `moveQueueItem`).
+    func playNext(id: String, kind: String, isLibrary: Bool) async throws {
+        try await callVoid("await MusicGlassBridge.playNext(\(js: id), \(js: kind), \(isLibrary));")
+    }
+
+    /// Best-effort append to the end of the live queue. See `playNext`.
+    func playLater(id: String, kind: String, isLibrary: Bool) async throws {
+        try await callVoid("await MusicGlassBridge.playLater(\(js: id), \(js: kind), \(isLibrary));")
+    }
+
+    // MARK: - Ratings (love/dislike) + library
+
+    func setRating(id: String, kind: String, value: Int) async throws {
+        try await callVoid("await MusicGlassBridge.setRating(\(js: id), \(js: kind), \(value));")
+    }
+
+    func removeRating(id: String, kind: String) async throws {
+        try await callVoid("await MusicGlassBridge.removeRating(\(js: id), \(js: kind));")
+    }
+
+    func addToLibrary(id: String, kind: String) async throws {
+        try await callVoid("await MusicGlassBridge.addToLibrary(\(js: id), \(js: kind));")
+    }
+
+    // MARK: - Playlist create/edit
+
+    func createPlaylist(name: String, description: String?, trackIds: [String]) async throws -> Playlist {
+        let idsJSON = Self.jsStringArrayLiteral(trackIds)
+        let descriptionJS = description.map { Self.jsStringLiteral($0) } ?? "null"
+        return try await call("return await MusicGlassBridge.createPlaylist(\(js: name), \(descriptionJS), \(idsJSON));")
+    }
+
+    func addTracksToPlaylist(playlistId: String, trackIds: [String]) async throws {
+        let idsJSON = Self.jsStringArrayLiteral(trackIds)
+        try await callVoid("await MusicGlassBridge.addTracksToPlaylist(\(js: playlistId), \(idsJSON));")
+    }
+
+    // MARK: - Real recently played + discovery
+
+    func fetchRecentlyPlayed() async throws -> [RecentlyPlayedItem] {
+        try await call("return await MusicGlassBridge.fetchRecentlyPlayed();")
+    }
+
+    func fetchRecommendations() async throws -> [RecommendationItem] {
+        try await call("return await MusicGlassBridge.fetchRecommendations();")
+    }
+
+    func fetchCharts() async throws -> ChartsResult {
+        try await call("return await MusicGlassBridge.fetchCharts();")
+    }
+
+    func fetchStations() async throws -> [Station] {
+        try await call("return await MusicGlassBridge.fetchStations();")
+    }
+
+    // MARK: - Search hints
+
+    func fetchSearchHints(term: String) async throws -> [String] {
+        try await call("return await MusicGlassBridge.fetchSearchHints(\(js: term));")
     }
 
     // MARK: - Library + catalog fetches
@@ -223,6 +305,13 @@ final class MusicKitBridge: NSObject, ObservableObject {
         return json
     }
 
+    /// Encodes `[String]` as a JS array literal, e.g. for a list of track IDs.
+    private static func jsStringArrayLiteral(_ values: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(values),
+              let json = String(data: data, encoding: .utf8) else { return "[]" }
+        return json
+    }
+
     // MARK: - Low-level JS call helpers
 
     /// Calls an async JS expression that returns Codable JSON, decodes it.
@@ -261,8 +350,18 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
 // MARK: - WKNavigationDelegate
 
+// Note: these WKNavigationDelegate/WKUIDelegate/WKScriptMessageHandler
+// conformances used to mark each method `nonisolated` and hop onto MainActor
+// internally (via `Task { @MainActor in ... }`) for anything touching
+// actor-isolated state. Under Swift 6 strict concurrency that fell apart as
+// soon as a method needed to *synchronously return* a MainActor-isolated
+// value (e.g. `createWebViewWith` must return the new `WKWebView` itself,
+// which is created and configured on the MainActor-isolated `webView`
+// property's peers). WebKit always invokes these delegate callbacks on the
+// main thread in practice, so it's both correct and necessary here to mark
+// the whole conformances `@MainActor` instead of `nonisolated` per-method.
 extension MusicKitBridge: WKNavigationDelegate {
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    @MainActor func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // The page itself calls back into `musicKitEvent` with `bridgeReady`
         // once MusicKit JS has configured and (if a stored token exists) restored auth.
     }
@@ -271,10 +370,10 @@ extension MusicKitBridge: WKNavigationDelegate {
 // MARK: - WKUIDelegate (surfaces the sign-in popup only)
 
 extension MusicKitBridge: WKUIDelegate {
-    nonisolated func webView(_ webView: WKWebView,
-                              createWebViewWith configuration: WKWebViewConfiguration,
-                              for navigationAction: WKNavigationAction,
-                              windowFeatures: WKWindowFeatures) -> WKWebView? {
+    @MainActor func webView(_ webView: WKWebView,
+                             createWebViewWith configuration: WKWebViewConfiguration,
+                             for navigationAction: WKNavigationAction,
+                             windowFeatures: WKWindowFeatures) -> WKWebView? {
         // `MusicKit.authorize()` triggers this via window.open() for the real
         // Apple sign-in page. Create a *visible* web view using the same
         // configuration (so it shares session/cookies) and hand it back —
@@ -282,18 +381,14 @@ extension MusicKitBridge: WKUIDelegate {
         let popup = WKWebView(frame: .zero, configuration: configuration)
         popup.navigationDelegate = self
         popup.uiDelegate = self
-        Task { @MainActor in
-            self.authPresentationWebView = popup
-        }
+        self.authPresentationWebView = popup
         return popup
     }
 
-    nonisolated func webViewDidClose(_ webView: WKWebView) {
+    @MainActor func webViewDidClose(_ webView: WKWebView) {
         // The auth popup calls window.close() itself once sign-in finishes.
-        Task { @MainActor in
-            if self.authPresentationWebView === webView {
-                self.authPresentationWebView = nil
-            }
+        if self.authPresentationWebView === webView {
+            self.authPresentationWebView = nil
         }
     }
 }
@@ -301,43 +396,52 @@ extension MusicKitBridge: WKUIDelegate {
 // MARK: - WKScriptMessageHandler
 
 extension MusicKitBridge: WKScriptMessageHandler {
-    nonisolated func userContentController(_ userContentController: WKUserContentController,
-                                            didReceive message: WKScriptMessage) {
+    @MainActor func userContentController(_ userContentController: WKUserContentController,
+                                           didReceive message: WKScriptMessage) {
         guard message.name == "musicKitEvent",
               let body = message.body as? [String: Any],
               let type = body["type"] as? String else { return }
 
-        Task { @MainActor in
-            switch type {
-            case "ready":
-                isReady = true
-                readyContinuations.forEach { $0.resume() }
-                readyContinuations.removeAll()
+        switch type {
+        case "ready":
+            isReady = true
+            readyContinuations.forEach { $0.resume() }
+            readyContinuations.removeAll()
 
-            case "authorizationStatusDidChange":
-                isAuthorized = (body["isAuthorized"] as? Bool) ?? false
+        case "authorizationStatusDidChange":
+            isAuthorized = (body["isAuthorized"] as? Bool) ?? false
 
-            case "nowPlayingItemDidChange":
-                if let data = try? JSONSerialization.data(withJSONObject: body["item"] ?? [:]),
-                   let info = try? JSONDecoder().decode(NowPlayingInfo.self, from: data) {
-                    nowPlaying = info
-                }
-
-            case "playbackStateDidChange":
-                if let raw = body["state"] as? Int, let status = PlaybackStatus(rawValue: raw) {
-                    playbackStatus = status
-                }
-
-            case "playbackTimeDidChange":
-                currentTime = (body["currentTime"] as? Double) ?? currentTime
-                duration = (body["duration"] as? Double) ?? duration
-
-            case "error":
-                lastError = body["message"] as? String
-
-            default:
-                break
+        case "nowPlayingItemDidChange":
+            if let data = try? JSONSerialization.data(withJSONObject: body["item"] ?? [:]),
+               let info = try? JSONDecoder().decode(NowPlayingInfo.self, from: data) {
+                nowPlaying = info
             }
+
+        case "playbackStateDidChange":
+            if let raw = body["state"] as? Int, let status = PlaybackStatus(rawValue: raw) {
+                playbackStatus = status
+            }
+
+        case "playbackTimeDidChange":
+            currentTime = (body["currentTime"] as? Double) ?? currentTime
+            duration = (body["duration"] as? Double) ?? duration
+
+        case "playbackModesDidChange":
+            if let raw = body["shuffleMode"] as? Int, let mode = ShuffleMode(rawValue: raw) {
+                shuffleMode = mode
+            }
+            if let raw = body["repeatMode"] as? Int, let mode = RepeatMode(rawValue: raw) {
+                repeatMode = mode
+            }
+            if let vol = body["volume"] as? Double {
+                volume = vol
+            }
+
+        case "error":
+            lastError = body["message"] as? String
+
+        default:
+            break
         }
     }
 }

@@ -14,6 +14,9 @@ struct RootView: View {
                 LibraryView()
                     .tabItem { Label("Library", systemImage: "music.note.list") }
 
+                DiscoverView()
+                    .tabItem { Label("Discover", systemImage: "sparkles") }
+
                 SearchView()
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
 

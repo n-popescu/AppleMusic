@@ -24,17 +24,45 @@ final class MusicLibraryStore: ObservableObject {
     @Published var queue: QueueSnapshot = .empty
     @Published var isLoadingQueue = false
 
-    /// Session-only history of what's been played, newest first. MusicKit JS
-    /// doesn't expose a "recently played" API of its own here, so this is
-    /// built locally by observing `nowPlaying` changes.
+    /// Session-only history of what's been played, newest first, built locally
+    /// by observing `nowPlaying` changes. Kept as a supplementary "This
+    /// Session" list in `QueueView` now that `recentlyPlayedHistory` below
+    /// surfaces Apple's own tracked history as the primary list.
     @Published private(set) var recentlyPlayed: [Song] = []
+
+    /// Apple's real, account-tracked history from `/v1/me/recent/played`.
+    @Published var recentlyPlayedHistory: [RecentlyPlayedItem] = []
+    @Published var isLoadingRecentlyPlayedHistory = false
+
+    // MARK: - Discovery
+
+    @Published var recommendations: [RecommendationItem] = []
+    @Published var charts: ChartsResult = .init()
+    @Published var stations: [Station] = []
+    @Published var isLoadingDiscover = false
+
+    // MARK: - Search hints
+
+    @Published var searchHints: [String] = []
 
     private var searchTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
-    init(bridge: MusicKitBridge = MusicKitBridge()) {
-        self.bridge = bridge
+    /// Weak reference to the most recently created store, so App Intents
+    /// (which have no SwiftUI environment to pull one from) can reach it.
+    static weak var current: MusicLibraryStore?
+
+    // `bridge` used to default to `MusicKitBridge()` directly in the parameter
+    // list, but Swift 6 strict concurrency evaluates default argument
+    // expressions in the (nonisolated) context of the call site rather than
+    // the (MainActor-isolated) body of this initializer, so constructing the
+    // MainActor-isolated `MusicKitBridge` there no longer type-checks. Doing
+    // it inside the body instead works because the whole init runs on
+    // MainActor (this class is `@MainActor`).
+    init(bridge: MusicKitBridge? = nil) {
+        self.bridge = bridge ?? MusicKitBridge()
         observeNowPlayingForHistory()
+        Self.current = self
     }
 
     private func observeNowPlayingForHistory() {
@@ -137,6 +165,7 @@ final class MusicLibraryStore: ObservableObject {
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else {
             searchResults = .init()
+            searchHints = []
             return
         }
         searchTask = Task {
@@ -144,8 +173,12 @@ final class MusicLibraryStore: ObservableObject {
             guard !Task.isCancelled else { return }
             isSearching = true
             defer { isSearching = false }
+            // Fire the real search and the lightweight hints/autocomplete
+            // fetch together — same debounce window, independent failures.
+            async let resultsTask = bridge.search(term: term)
+            async let hintsTask = bridge.fetchSearchHints(term: term)
             do {
-                let results = try await bridge.search(term: term)
+                let results = try await resultsTask
                 if !Task.isCancelled {
                     searchResults = results
                     errorMessage = nil
@@ -154,6 +187,9 @@ final class MusicLibraryStore: ObservableObject {
                 if !Task.isCancelled {
                     errorMessage = error.localizedDescription
                 }
+            }
+            if let hints = try? await hintsTask, !Task.isCancelled {
+                searchHints = hints
             }
         }
     }
@@ -184,6 +220,181 @@ final class MusicLibraryStore: ObservableObject {
             try await bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func play(station: Station) async {
+        guard let params = station.playParams else { return }
+        do {
+            try await bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Shuffle / Repeat / Volume
+
+    func setShuffleMode(_ mode: ShuffleMode) async {
+        do {
+            try await bridge.setShuffleMode(mode)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func cycleRepeatMode() async {
+        do {
+            try await bridge.setRepeatMode(bridge.repeatMode.next)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func setVolume(_ value: Double) async {
+        do {
+            try await bridge.setVolume(value)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Play Next / Play Later
+
+    func playNext(song: Song) async {
+        guard let params = song.playParams else { return }
+        do {
+            try await bridge.playNext(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func playLater(song: Song) async {
+        guard let params = song.playParams else { return }
+        do {
+            try await bridge.playLater(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Ratings (love/dislike) + Add to Library
+
+    /// `value` is 1 for love, -1 for dislike; pass the same value again to un-set it.
+    func setRating(id: String, kind: String, value: Int) async {
+        do {
+            try await bridge.setRating(id: id, kind: kind, value: value)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeRating(id: String, kind: String) async {
+        do {
+            try await bridge.removeRating(id: id, kind: kind)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func addToLibrary(id: String, kind: String) async {
+        do {
+            try await bridge.addToLibrary(id: id, kind: kind)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Playlist create/edit
+
+    @discardableResult
+    func createPlaylist(name: String, description: String? = nil, trackIds: [String] = []) async -> Playlist? {
+        do {
+            let playlist = try await bridge.createPlaylist(name: name, description: description, trackIds: trackIds)
+            await refreshLibrary()
+            return playlist
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func addTrack(_ song: Song, toPlaylist playlist: Playlist) async {
+        do {
+            try await bridge.addTracksToPlaylist(playlistId: playlist.id, trackIds: [song.id])
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Real recently played history
+
+    func refreshRecentlyPlayedHistory() async {
+        isLoadingRecentlyPlayedHistory = true
+        defer { isLoadingRecentlyPlayedHistory = false }
+        do {
+            recentlyPlayedHistory = try await bridge.fetchRecentlyPlayed()
+        } catch {
+            // Non-fatal: the session-local `recentlyPlayed` list still works
+            // as a fallback, so don't surface this as a blocking error.
+        }
+    }
+
+    // MARK: - Discovery
+
+    func refreshDiscover() async {
+        isLoadingDiscover = true
+        defer { isLoadingDiscover = false }
+
+        async let recommendationsResult = bridge.fetchRecommendations()
+        async let chartsResult = bridge.fetchCharts()
+        async let stationsResult = bridge.fetchStations()
+
+        do {
+            recommendations = try await recommendationsResult
+        } catch { /* leave previous value; discovery sections fail independently */ }
+        do {
+            charts = try await chartsResult
+        } catch { /* ditto */ }
+        do {
+            stations = try await stationsResult
+        } catch { /* ditto */ }
+    }
+
+    // MARK: - Search hints
+
+    func refreshSearchHints(term: String) async {
+        guard !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            searchHints = []
+            return
+        }
+        do {
+            searchHints = try await bridge.fetchSearchHints(term: term)
+        } catch {
+            searchHints = []
+        }
+    }
+
+    /// Fills the search field with a tapped hint and searches immediately,
+    /// bypassing the debounce since the user has already committed to it.
+    func selectSearchHint(_ hint: String) {
+        searchTask?.cancel()
+        searchText = hint
+        searchHints = []
+        searchTask = Task {
+            isSearching = true
+            defer { isSearching = false }
+            do {
+                let results = try await bridge.search(term: hint)
+                if !Task.isCancelled {
+                    searchResults = results
+                    errorMessage = nil
+                }
+            } catch {
+                if !Task.isCancelled {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 

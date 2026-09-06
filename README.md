@@ -31,24 +31,30 @@ AppleMusic/                              repo root
         ├── App/
         │   └── MusicGlassApp.swift          entry point; configures AVAudioSession
         ├── Models/
-        │   └── MusicModels.swift            Song, Album, Artist, Playlist, NowPlayingInfo, Queue…
+        │   ├── MusicModels.swift            Song, Album, Artist, Playlist, Station, NowPlayingInfo, Queue, Charts…
+        │   └── MusicGlassActivityAttributes.swift  shared Live Activity ContentState (see below)
         ├── Services/
         │   ├── MusicKitBridge.swift              hidden WKWebView + JS bridge (auth, playback, fetches, queue)
         │   ├── MusicLibraryStore.swift            app-wide ObservableObject views read from
-        │   └── NowPlayingRemoteController.swift   mirrors playback into Lock Screen / Control Center
+        │   └── NowPlayingRemoteController.swift   mirrors playback into Lock Screen / Control Center + Live Activity
         ├── Views/
         │   ├── GlassComponents.swift        GlassSurface / GlassCard / GlassButtonStyle / shared states
-        │   ├── SongRow.swift                shared row + artwork image
-        │   ├── LibraryView.swift            Playlists / Albums / Artists / Songs
+        │   ├── SongRow.swift                shared row + artwork image + Play Next/Later, ratings, Add to Playlist
+        │   ├── LibraryView.swift            Playlists / Albums / Artists / Songs + New Playlist sheet
         │   ├── PlaylistDetailView.swift
         │   ├── AlbumDetailView.swift
-        │   ├── SearchView.swift             catalog search across all 4 types
-        │   ├── QueueView.swift              Up Next (reorderable) + Recently Played
+        │   ├── DiscoverView.swift           Listen Now / Top Charts / Radio Stations
+        │   ├── SearchView.swift             catalog search across all 4 types + search hints
+        │   ├── QueueView.swift              Up Next (reorderable) + real & session Recently Played
         │   ├── NowPlayingBar.swift          docked mini player
-        │   ├── NowPlayingFullView.swift     full-screen player sheet
+        │   ├── NowPlayingFullView.swift     full-screen player sheet + shuffle/repeat/volume
         │   ├── AuthPopupSheet.swift         hosts the sign-in popup only
         │   ├── SettingsView.swift           sign in / out
         │   └── RootView.swift               TabView + hidden bridge + sheets
+        ├── Intents/
+        │   ├── PlayMediaIntent.swift        Siri/Shortcuts: play a playlist/album by name
+        │   ├── TogglePlaybackIntent.swift   Siri/Shortcuts: play/pause
+        │   └── MusicGlassShortcuts.swift    AppShortcutsProvider registering both
         └── Resources/
             ├── musickit-bridge.html         loads MusicKit JS, exposes window.MusicGlassBridge
             └── Info.plist
@@ -211,6 +217,133 @@ with its own certificate/profile secrets — intentionally out of scope here.
 
 ---
 
+## Shuffle, Repeat, Volume
+
+`music.shuffleMode` / `music.repeatMode` / the player's volume are surfaced as
+`@Published` state on `MusicKitBridge` (`shuffleMode`, `repeatMode`, `volume`),
+kept in sync via a `playbackModesDidChange` event the bridge posts from JS
+after every setter call and once on `ready` (MusicKit JS doesn't fire a
+dedicated change event for these — they're plain properties). Controls for
+all three live in `NowPlayingFullView`: a shuffle toggle and a repeat button
+(cycles off → all → one → off, with `repeat`/`repeat.1` SF Symbols) flank the
+transport controls, and a volume slider sits just below them.
+
+## Play Next / Play Later
+
+Song rows (`SongRow.swift`) expose "Play Next" and "Play Later" via context
+menu and a leading swipe action. The bridge uses MusicKit JS's documented
+`music.playNext(descriptor)` / `music.playLater(descriptor)` when present,
+falling back to a client-side queue rebuild (same approach as the existing
+`moveQueueItem`) if a given MusicKit JS release doesn't have them — see the
+caveat comments in `musickit-bridge.html` next to `insertIntoQueueFallback`.
+
+## Love/Dislike + Add to Library
+
+`SongRow`'s context menu adds Love/Dislike (via `PUT`/`DELETE`
+`/v1/me/ratings/{type}/{id}`) and "Add to Library" (`POST /v1/me/library`) for
+catalog (non-library) results. Album and playlist detail screens get the same
+actions in a header menu/button next to their "Play" button.
+
+## Playlist create/edit
+
+A "+" button in Library → Playlists opens `NewPlaylistSheet` (name +
+optional description, `POST /v1/me/library/playlists`). Every song row's
+"Add to Playlist…" action opens `AddToPlaylistSheet`, which lists existing
+library playlists to add the track to (`POST
+/v1/me/library/playlists/{id}/tracks`) or lets you create a new one with that
+track already in it.
+
+## Real recently played history
+
+`QueueView` now shows Apple's real, account-tracked history from
+`/v1/me/recent/played` as the primary "Recently Played" section (mixed
+songs/albums/playlists, whichever Apple returns), with the original
+session-local list (built by observing `nowPlaying` changes) kept underneath
+as a supplementary "This Session" section — it updates instantly with
+whatever's playing right now, even before Apple's tracked history catches up.
+
+## Discover tab
+
+A new **Discover** tab (`Views/DiscoverView.swift`) shows three horizontally
+scrolling sections: "Listen Now" (`/v1/me/recommendations`, flattening each
+recommendation's `relationships.contents` into album/playlist tiles), "Top
+Songs"/"Top Albums" (`/v1/catalog/{storefront}/charts`), and "Radio"
+(`/v1/catalog/{storefront}/stations`). Storefront resolution reuses the same
+approach as catalog search: `music.storefrontId` inside the bridge, already
+tied to the signed-in account's own region. Station playback goes through the
+same `setQueueAndPlay` used for everything else — MusicKit JS's
+`SetQueueOptions` takes a single station id under a `station` key (not an
+array, unlike songs/albums/playlists), which `setQueueAndPlay` branches on.
+
+## Search hints/autocomplete
+
+`SearchView` shows a horizontally scrolling row of suggested terms from
+`/v1/catalog/{storefront}/search/hints`, fetched on the same 300ms debounce
+as the real search (`MusicLibraryStore.performSearchDebounced`). Tapping a
+hint fills the search field and runs the real search immediately, bypassing
+the debounce.
+
+## Siri / Shortcuts (App Intents)
+
+`Intents/PlayMediaIntent.swift` ("Play [name] in MusicGlass" — resolves
+against library playlists/albums by name) and
+`Intents/TogglePlaybackIntent.swift` ("Play/Pause") are plain `AppIntent`s
+living directly in the main app target — no separate Intents extension
+target is needed for `AppIntents` on iOS 16+.
+`Intents/MusicGlassShortcuts.swift` registers both as an
+`AppShortcutsProvider` so they show up in the Shortcuts app and respond to
+Siri phrases out of the box. Since App Intents have no SwiftUI environment to
+pull a store from, they reach the running app's state via
+`MusicLibraryStore.current`, a weak static reference the store sets on itself
+in `init`; if the app has never launched in this process, the intent reports
+that back through its dialog rather than crashing.
+
+## Live Activity / Widget — manual Xcode step required
+
+Real Live Activities (Lock Screen / Dynamic Island) and a Home Screen widget
+both need a separate **Widget Extension** target — its own `Info.plist`,
+entitlements, and (for a same-content widget) an App Group. Hand-authoring a
+second `PBXNativeTarget` into `project.pbxproj` blind, with no Xcode/macOS
+available to validate it, risks silently corrupting the whole project file
+for every other feature in this app — so that target was **not** added.
+
+What *is* done, so the extension is a drop-in away from working:
+
+- `Models/MusicGlassActivityAttributes.swift` defines the shared
+  `ActivityAttributes` type (`MusicGlassActivityAttributes.ContentState`:
+  title, artist, album, artwork URL, playing state, elapsed/duration) that
+  both the main app and a future widget extension would use.
+- `Services/NowPlayingRemoteController.swift` requests/updates/ends a
+  `Activity<MusicGlassActivityAttributes>` from the same playback-state
+  stream that already feeds `MPNowPlayingInfoCenter`, guarded by
+  `#available(iOS 16.2, *)` and `#if canImport(ActivityKit)`. Until the
+  extension exists, `Activity.request` will simply throw (caught and
+  ignored) since there's no widget bundle to render it — this is expected
+  and harmless.
+- `Info.plist` already declares `NSSupportsLiveActivities = YES`.
+
+**To finish wiring it up in Xcode:**
+1. File → New → Target… → **Widget Extension**. Check **"Include Live
+   Activity"**. Name it (e.g. `MusicGlassWidget`); Xcode will suggest a
+   bundle id like `com.musicglass.app.MusicGlassWidget` — that's fine as a
+   suffix of the main app's `com.musicglass.app`.
+2. Give `Models/MusicGlassActivityAttributes.swift` **Target Membership** in
+   both the main app target and the new widget extension target (File
+   Inspector → Target Membership, check both boxes) so
+   `Activity<MusicGlassActivityAttributes>` type-checks on both sides.
+3. Build the actual Live Activity / Dynamic Island SwiftUI layout in the new
+   extension's generated widget file, reading from
+   `MusicGlassActivityAttributes.ContentState` — title/artist/album text,
+   `AsyncImage`-style artwork from `artworkURL`, and a play/pause glyph from
+   `isPlaying`.
+4. For a Home Screen widget showing "what's playing" independent of Live
+   Activities (i.e. even when nothing is currently playing), add an App
+   Group entitlement to both targets and have `NowPlayingRemoteController`
+   write the latest snapshot to shared `UserDefaults(suiteName:)` for a
+   `TimelineProvider` in the extension to read — not needed for Live
+   Activities themselves, which update via direct `Activity.update(...)`
+   calls from the main app process.
+
 ## AirPlay
 
 `Views/AirPlayButton.swift` wraps `AVRoutePickerView` (AVKit) so the Now
@@ -242,3 +375,33 @@ planned as part of this pass:
 - **Dynamic backend-issued developer tokens** — the developer token is a
   static value pasted into `Info.plist` (see step 1). A shipped app should
   fetch a fresh one from a small backend instead, since tokens expire.
+- **A Home Screen widget UI / Widget Extension target** — see "Live Activity
+  / Widget — manual Xcode step required" above.
+- **Last.fm scrobbling / Discord Rich Presence** — considered and explicitly
+  declined; not implemented and not planned.
+
+---
+
+## Swift 6 strict concurrency fix
+
+CI (`xcodebuild` on `macos-latest`) surfaced a real build error once Swift 6
+strict concurrency checking was in effect: `MusicLibraryStore`'s initializer
+used to default its `bridge` parameter directly to `MusicKitBridge()` in the
+parameter list. Default argument *expressions* are evaluated in the
+(nonisolated) context of the call site rather than the (`@MainActor`-isolated)
+body of the initializer, so constructing the `@MainActor`-isolated
+`MusicKitBridge` there no longer type-checked. Fixed by defaulting the
+parameter to `nil` and constructing the bridge inside the initializer's body
+instead (which runs on MainActor, since the class itself is `@MainActor`) —
+see `Services/MusicLibraryStore.swift`.
+
+The same pass fixed the related warnings in `MusicKitBridge`'s
+`WKNavigationDelegate`/`WKUIDelegate`/`WKScriptMessageHandler` conformances:
+each method used to be `nonisolated` and hop onto `MainActor` internally via
+`Task { @MainActor in ... }` for anything touching actor-isolated state, which
+falls apart for a method that must *synchronously return* a MainActor-isolated
+value (`webView(_:createWebViewWith:...)` has to return the new `WKWebView`
+itself). Since WebKit always invokes these delegate callbacks on the main
+thread in practice, the conforming methods are now marked `@MainActor`
+directly instead of `nonisolated`, which is the standard fix for Swift 6
+strict concurrency with WebKit/UIKit-style Objective-C delegate protocols.

@@ -12,6 +12,7 @@ struct LibraryView: View {
     }
 
     @State private var selectedSection: Section = .playlists
+    @State private var showNewPlaylistSheet = false
 
     var body: some View {
         NavigationStack {
@@ -66,9 +67,24 @@ struct LibraryView: View {
             }
             .navigationTitle("Library")
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                if selectedSection == .playlists {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showNewPlaylistSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                }
+            }
             .refreshable { await store.refreshLibrary() }
             .task {
                 if store.playlists.isEmpty { await store.refreshLibrary() }
+            }
+            .sheet(isPresented: $showNewPlaylistSheet) {
+                NewPlaylistSheet()
+                    .environmentObject(store)
             }
         }
     }
@@ -208,6 +224,76 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+}
+
+/// Minimal "New Playlist" flow: name + optional description, reachable from
+/// the "+" button in Library > Playlists.
+struct NewPlaylistSheet: View {
+    @EnvironmentObject var store: MusicLibraryStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var description = ""
+    @State private var isCreating = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.clear.glassBackdrop()
+                VStack(spacing: 16) {
+                    GlassCard {
+                        VStack(spacing: 14) {
+                            TextField("Playlist Name", text: $name)
+                                .textFieldStyle(.plain)
+                                .foregroundStyle(.white)
+                            Divider().background(.white.opacity(0.15))
+                            TextField("Description (optional)", text: $description)
+                                .textFieldStyle(.plain)
+                                .foregroundStyle(.white)
+                        }
+                    }
+
+                    Button {
+                        Task { await create() }
+                    } label: {
+                        if isCreating {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text("Create Playlist")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background { GlassSurface(cornerRadius: 16, tint: .pink) { Color.clear } }
+                    .foregroundStyle(.white)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
+
+                    Spacer()
+                }
+                .padding(16)
+            }
+            .navigationTitle("New Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func create() async {
+        isCreating = true
+        defer { isCreating = false }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+        _ = await store.createPlaylist(name: trimmedName, description: trimmedDescription.isEmpty ? nil : trimmedDescription)
+        dismiss()
     }
 }
 

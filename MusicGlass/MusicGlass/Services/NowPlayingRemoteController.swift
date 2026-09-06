@@ -4,6 +4,9 @@ import Combine
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 
 /// Mirrors playback state from the hidden MusicKit JS engine into the system's
 /// Lock Screen / Control Center "Now Playing" UI, and wires transport controls
@@ -22,10 +25,17 @@ final class NowPlayingRemoteController {
     private var cachedArtworkImage: UIImage?
     private var artworkLoadTask: Task<Void, Never>?
 
+    /// The running Live Activity, if any. Typed `Any` (rather than
+    /// `Activity<MusicGlassActivityAttributes>`) so this property itself
+    /// doesn't need an `@available` annotation, which Swift doesn't allow on
+    /// stored properties of a non-`@available` class.
+    private var liveActivity: Any?
+
     init(store: MusicLibraryStore) {
         self.store = store
         configureRemoteCommands()
         observePlaybackState()
+        observePlaybackStateForLiveActivity()
     }
 
     // MARK: - Mirroring MusicKitBridge -> MPNowPlayingInfoCenter
@@ -137,6 +147,77 @@ final class NowPlayingRemoteController {
         center.skipBackwardCommand.isEnabled = false
         center.seekForwardCommand.isEnabled = false
         center.seekBackwardCommand.isEnabled = false
+    }
+
+    // MARK: - Live Activity / Dynamic Island
+    //
+    // This is code-ready but currently inert: `Activity.request` needs a
+    // matching Widget Extension target (which owns the actual Live Activity
+    // UI) to be present in the app bundle, and this project intentionally
+    // doesn't hand-author one blind — see the README's "Live Activity /
+    // Widget — manual Xcode step required" section. Until that extension is
+    // added, these calls will simply fail (caught and ignored below) rather
+    // than doing anything visible. `MusicGlassActivityAttributes` (in
+    // Models/) is the shared type both sides would use.
+
+    private func observePlaybackStateForLiveActivity() {
+        guard #available(iOS 16.2, *) else { return }
+        store.bridge.$nowPlaying
+            .combineLatest(store.bridge.$playbackStatus, store.bridge.$currentTime, store.bridge.$duration)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] nowPlaying, status, currentTime, duration in
+                self?.updateLiveActivity(nowPlaying: nowPlaying, status: status, currentTime: currentTime, duration: duration)
+            }
+            .store(in: &cancellables)
+    }
+
+    @available(iOS 16.2, *)
+    private func updateLiveActivity(nowPlaying: NowPlayingInfo, status: PlaybackStatus, currentTime: Double, duration: Double) {
+        #if canImport(ActivityKit)
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+
+        guard !nowPlaying.title.isEmpty else {
+            Task { await endLiveActivity() }
+            return
+        }
+
+        let state = MusicGlassActivityAttributes.ContentState(
+            title: nowPlaying.title,
+            artistName: nowPlaying.artistName,
+            albumName: nowPlaying.albumName,
+            artworkURL: nowPlaying.artworkURL,
+            isPlaying: status.isPlaying,
+            currentTimeSeconds: currentTime,
+            durationSeconds: duration
+        )
+
+        if let activity = liveActivity as? Activity<MusicGlassActivityAttributes> {
+            Task {
+                await activity.update(ActivityContent(state: state, staleDate: nil))
+            }
+        } else {
+            do {
+                let activity = try Activity<MusicGlassActivityAttributes>.request(
+                    attributes: MusicGlassActivityAttributes(),
+                    content: ActivityContent(state: state, staleDate: nil)
+                )
+                liveActivity = activity
+            } catch {
+                // No Widget Extension target present yet (or the user has
+                // Live Activities disabled) — nothing to do until the
+                // manual Xcode step in the README is completed.
+            }
+        }
+        #endif
+    }
+
+    @available(iOS 16.2, *)
+    private func endLiveActivity() async {
+        #if canImport(ActivityKit)
+        guard let activity = liveActivity as? Activity<MusicGlassActivityAttributes> else { return }
+        await activity.end(nil, dismissalPolicy: .immediate)
+        liveActivity = nil
+        #endif
     }
 
     /// Fires a bridge call from a synchronous MPRemoteCommandCenter callback,

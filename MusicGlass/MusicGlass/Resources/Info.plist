@@ -38,6 +38,17 @@
     </array>
 
     <!--
+      Lets the app request Live Activities (Lock Screen / Dynamic Island).
+      The Swift side that requests/updates/ends them
+      (Services/NowPlayingRemoteController.swift, guarded by
+      `#available(iOS 16.2, *)`) is code-ready, but actually *rendering*
+      one needs a Widget Extension target this project doesn't add — see
+      README.md -> "Live Activity / Widget — manual Xcode step required".
+    -->
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+
+    <!--
       Paste your MusicKit developer token (a signed JWT) here.
       See README.md -> "1. Generate a MusicKit developer token".
       Do NOT commit a real token to a public repo — for a real project,

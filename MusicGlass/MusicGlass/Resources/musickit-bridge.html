@@ -69,6 +69,36 @@
     });
   }
 
+  // MusicKit JS doesn't fire a dedicated event when shuffle/repeat/volume
+  // change (they're plain properties, not observable), so the bridge posts a
+  // fresh snapshot itself right after every setter call below, plus once on
+  // `ready` so native starts in sync.
+  function postPlaybackModes() {
+    if (!music) return;
+    post({
+      type: 'playbackModesDidChange',
+      shuffleMode: typeof music.shuffleMode === 'number' ? music.shuffleMode : 0,
+      repeatMode: typeof music.repeatMode === 'number' ? music.repeatMode : 0,
+      volume: currentVolume()
+    });
+  }
+
+  // MusicKit JS has carried player volume at `music.player.volume` in some
+  // releases and directly at `music.volume` in others; read/write defensively
+  // through whichever is present.
+  function currentVolume() {
+    if (music.player && typeof music.player.volume === 'number') return music.player.volume;
+    if (typeof music.volume === 'number') return music.volume;
+    return 1;
+  }
+  function applyVolume(value) {
+    if (music.player && 'volume' in music.player) {
+      music.player.volume = value;
+    } else {
+      music.volume = value;
+    }
+  }
+
   document.addEventListener('musickitloaded', async () => {
     try {
       await MusicKit.configure({
@@ -79,6 +109,7 @@
       attachInstanceListeners(music);
       post({ type: 'ready' });
       post({ type: 'authorizationStatusDidChange', isAuthorized: music.isAuthorized });
+      postPlaybackModes();
     } catch (err) {
       post({ type: 'error', message: 'MusicKit configure failed: ' + err.message });
     }
@@ -135,6 +166,18 @@
     };
   }
 
+  function mapStationAttributes(id, a) {
+    return {
+      id: id,
+      name: a.name,
+      artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
+      isLive: !!a.isLive,
+      playParams: a.playParams
+        ? { id: a.playParams.id, kind: a.playParams.kind || 'station', isLibrary: false }
+        : { id: id, kind: 'station', isLibrary: false }
+    };
+  }
+
   function mapArtistAttributes(id, a) {
     return {
       id: id,
@@ -155,6 +198,36 @@
         ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
         : { id: id, kind: 'playlist', isLibrary: !!isLibrary }
     };
+  }
+
+  // Client-side fallback used by playNext/playLater when MusicKit JS's own
+  // `playNext`/`playLater` aren't available: rebuilds the queue array with
+  // the new item spliced in either right after the current track ('next') or
+  // at the end ('later'), same rebuild-and-resume approach as
+  // `moveQueueItem`. Only needs {id, kind} for every item, which is all
+  // `setQueue({ items })` requires.
+  async function insertIntoQueueFallback(id, kind, position) {
+    const m = requireMusic();
+    const q = m.queue;
+    const items = (q && q.items)
+      ? q.items.map(i => ({ id: i.id, kind: (i.playParams && i.playParams.kind) || 'song' }))
+      : [];
+    const wasPlayingIndex = (q && typeof q.position === 'number') ? q.position : -1;
+    const currentlyPlayingItem = (q && q.items && wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
+      ? q.items[wasPlayingIndex]
+      : null;
+
+    const insertAt = position === 'next' ? Math.min(wasPlayingIndex + 1, items.length) : items.length;
+    items.splice(Math.max(insertAt, 0), 0, { id: id, kind: kind });
+
+    await m.setQueue({ items: items });
+
+    if (currentlyPlayingItem) {
+      const newIndex = items.findIndex(i => i.id === currentlyPlayingItem.id);
+      if (newIndex >= 0) {
+        await m.changeToMediaAtIndex(newIndex);
+      }
+    }
   }
 
   window.MusicGlassBridge = {
@@ -183,10 +256,194 @@
     setQueueAndPlay: async function (id, kind, isLibrary) {
       const m = requireMusic();
       const descriptor = {};
-      const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
-      descriptor[key] = [id];
+      if (kind === 'station') {
+        // MusicKit JS's SetQueueOptions takes a single station id under
+        // `station` (not an array like the other descriptor keys) — stations
+        // always play from the catalog, never the library.
+        descriptor.station = id;
+      } else {
+        const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
+        descriptor[key] = [id];
+      }
       await m.setQueue(descriptor);
       await m.play();
+    },
+
+    // ---- Shuffle / Repeat / Volume ----
+    setShuffleMode: async function (mode) {
+      const m = requireMusic();
+      m.shuffleMode = mode;
+      postPlaybackModes();
+    },
+
+    setRepeatMode: async function (mode) {
+      const m = requireMusic();
+      m.repeatMode = mode;
+      postPlaybackModes();
+    },
+
+    setVolume: async function (value) {
+      requireMusic();
+      applyVolume(value);
+      postPlaybackModes();
+    },
+
+    // ---- Play Next / Play Later ----
+    // MusicKit JS's documented `music.playNext(descriptor)` /
+    // `music.playLater(descriptor)` insert into the live queue without
+    // rebuilding it. Both are used when present; since this project can't be
+    // verified against a live MusicKit JS release, a client-side fallback
+    // (same rebuild-the-array approach as `moveQueueItem`) covers releases
+    // where they're missing or throw.
+    playNext: async function (id, kind, isLibrary) {
+      const m = requireMusic();
+      const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
+      const descriptor = {};
+      descriptor[key] = [id];
+      if (typeof m.playNext === 'function') {
+        try {
+          await m.playNext(descriptor);
+          return;
+        } catch (e) {
+          // Fall through to the client-side fallback below.
+        }
+      }
+      await insertIntoQueueFallback(id, kind, 'next');
+    },
+
+    playLater: async function (id, kind, isLibrary) {
+      const m = requireMusic();
+      const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
+      const descriptor = {};
+      descriptor[key] = [id];
+      if (typeof m.playLater === 'function') {
+        try {
+          await m.playLater(descriptor);
+          return;
+        } catch (e) {
+          // Fall through to the client-side fallback below.
+        }
+      }
+      await insertIntoQueueFallback(id, kind, 'later');
+    },
+
+    // ---- Ratings (love/dislike) ----
+    // Apple Music REST: PUT .../v1/me/ratings/{type}/{id} with
+    // { attributes: { value: 1 } } for love, -1 for dislike; DELETE removes it.
+    setRating: async function (id, kind, value) {
+      const m = requireMusic();
+      await m.api.music(`/v1/me/ratings/${kind}s/${id}`, {}, {
+        fetchOptions: { method: 'PUT', body: JSON.stringify({ attributes: { value: value } }) }
+      });
+    },
+
+    removeRating: async function (id, kind) {
+      const m = requireMusic();
+      await m.api.music(`/v1/me/ratings/${kind}s/${id}`, {}, { fetchOptions: { method: 'DELETE' } });
+    },
+
+    // ---- Add to Library ----
+    // POST .../v1/me/library?ids[songs]=... (or albums/playlists) adds a
+    // catalog item to the signed-in account's library.
+    addToLibrary: async function (id, kind) {
+      const m = requireMusic();
+      await m.api.music('/v1/me/library', { [`ids[${kind}s]`]: id }, { fetchOptions: { method: 'POST' } });
+    },
+
+    // ---- Playlist create/edit ----
+    createPlaylist: async function (name, description, trackIds) {
+      const m = requireMusic();
+      const attributes = { name: name };
+      if (description) attributes.description = description;
+      const body = { attributes: attributes };
+      if (trackIds && trackIds.length) {
+        body.relationships = { tracks: { data: trackIds.map(id => ({ id: id, type: 'songs' })) } };
+      }
+      const res = await m.api.music('/v1/me/library/playlists', {}, {
+        fetchOptions: { method: 'POST', body: JSON.stringify(body) }
+      });
+      const d = (res.data.data || [])[0];
+      if (d) {
+        return mapPlaylistAttributes(d.id, d.attributes || attributes, true);
+      }
+      // Some MusicKit JS versions return an empty body on 201; degrade gracefully.
+      return { id: '', name: name, curatorName: null, artwork: null, trackCount: (trackIds || []).length, description: description || null, playParams: null };
+    },
+
+    addTracksToPlaylist: async function (playlistId, trackIds) {
+      const m = requireMusic();
+      const body = { data: trackIds.map(id => ({ id: id, type: 'songs' })) };
+      await m.api.music(`/v1/me/library/playlists/${playlistId}/tracks`, {}, {
+        fetchOptions: { method: 'POST', body: JSON.stringify(body) }
+      });
+    },
+
+    // ---- Real recently played history ----
+    fetchRecentlyPlayed: async function () {
+      const m = requireMusic();
+      const res = await m.api.music('/v1/me/recent/played', { limit: 30 });
+      const data = res.data.data || [];
+      return data.map(d => {
+        const isLibraryType = typeof d.type === 'string' && d.type.startsWith('library-');
+        if (d.type === 'songs' || d.type === 'library-songs') {
+          return { kind: 'song', song: mapSongAttributes(d.id, d.attributes, isLibraryType), album: null, playlist: null };
+        }
+        if (d.type === 'albums' || d.type === 'library-albums') {
+          return { kind: 'album', song: null, album: mapAlbumAttributes(d.id, d.attributes, isLibraryType), playlist: null };
+        }
+        if (d.type === 'playlists' || d.type === 'library-playlists') {
+          return { kind: 'playlist', song: null, album: null, playlist: mapPlaylistAttributes(d.id, d.attributes, isLibraryType) };
+        }
+        return null; // e.g. stations — not modeled in the "recently played" UI.
+      }).filter(x => x !== null);
+    },
+
+    // ---- Discovery ----
+    fetchRecommendations: async function () {
+      const m = requireMusic();
+      const res = await m.api.music('/v1/me/recommendations', { limit: 10 });
+      const data = res.data.data || [];
+      const items = [];
+      data.forEach(rec => {
+        const contents = (rec.relationships && rec.relationships.contents && rec.relationships.contents.data) || [];
+        contents.forEach(c => {
+          if (c.type === 'albums') {
+            items.push({ kind: 'album', album: mapAlbumAttributes(c.id, c.attributes, false), playlist: null });
+          } else if (c.type === 'playlists') {
+            items.push({ kind: 'playlist', album: null, playlist: mapPlaylistAttributes(c.id, c.attributes, false) });
+          }
+        });
+      });
+      return items;
+    },
+
+    fetchCharts: async function () {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/charts`, { types: 'songs,albums', limit: 20 });
+      const results = res.data.results || {};
+      const songsChart = (results.songs && results.songs[0] && results.songs[0].data) || [];
+      const albumsChart = (results.albums && results.albums[0] && results.albums[0].data) || [];
+      return {
+        songs: songsChart.map(d => mapSongAttributes(d.id, d.attributes, false)),
+        albums: albumsChart.map(d => mapAlbumAttributes(d.id, d.attributes, false))
+      };
+    },
+
+    fetchStations: async function () {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/stations`, { limit: 20 });
+      const data = res.data.data || [];
+      return data.map(d => mapStationAttributes(d.id, d.attributes));
+    },
+
+    // ---- Search hints/autocomplete ----
+    fetchSearchHints: async function (term) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/search/hints`, { term: term });
+      return (res.data.results && res.data.results.terms) || [];
     },
 
     // ---- Library ----

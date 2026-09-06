@@ -26,6 +26,11 @@
 		31D08A4D044445BFBB65E042 /* SongRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E85C816B4BF46E7BB9DFC9E /* SongRow.swift */; };
 		48E89310837D4B8B8CF48880 /* musickit-bridge.html in Resources */ = {isa = PBXBuildFile; fileRef = 61492DBE2832478788D6351A /* musickit-bridge.html */; };
 		B9790AB5E830422BBAA2E236 /* AirPlayButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD7661444AF484593402647 /* AirPlayButton.swift */; };
+		DAB0BCF27DD8429F8CFDFEF0 /* DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6974F46775A4B2882312546 /* DiscoverView.swift */; };
+		A6EC2D1218E44DA6983DB63C /* MusicGlassActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0919727F252A43D09B9F26FE /* MusicGlassActivityAttributes.swift */; };
+		B4ACE4CFCAB149889A88B3CA /* PlayMediaIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC9B8E36E234AF3B0FF8A95 /* PlayMediaIntent.swift */; };
+		87E03DD4C695470A81920FC0 /* TogglePlaybackIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6A6EE808F0415A815CAC16 /* TogglePlaybackIntent.swift */; };
+		A40FB9FB371748EA98F823A7 /* MusicGlassShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A247878B0DE344EA8F0EA4CA /* MusicGlassShortcuts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +55,11 @@
 		6AD7661444AF484593402647 /* AirPlayButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayButton.swift; sourceTree = "<group>"; };
 		69AFD26AE65941DFBC4315B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		19777773E2494FA983888517 /* MusicGlass.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicGlass.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B6974F46775A4B2882312546 /* DiscoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverView.swift; sourceTree = "<group>"; };
+		0919727F252A43D09B9F26FE /* MusicGlassActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicGlassActivityAttributes.swift; sourceTree = "<group>"; };
+		CCC9B8E36E234AF3B0FF8A95 /* PlayMediaIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayMediaIntent.swift; sourceTree = "<group>"; };
+		7A6A6EE808F0415A815CAC16 /* TogglePlaybackIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TogglePlaybackIntent.swift; sourceTree = "<group>"; };
+		A247878B0DE344EA8F0EA4CA /* MusicGlassShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicGlassShortcuts.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,8 +85,19 @@
 			isa = PBXGroup;
 			children = (
 				3B284370FD5549E2B7420E7C /* MusicModels.swift */,
+				0919727F252A43D09B9F26FE /* MusicGlassActivityAttributes.swift */,
 			);
 			path = Models;
+			sourceTree = "<group>";
+		};
+		7223275F4E00415F9048F744 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				CCC9B8E36E234AF3B0FF8A95 /* PlayMediaIntent.swift */,
+				7A6A6EE808F0415A815CAC16 /* TogglePlaybackIntent.swift */,
+				A247878B0DE344EA8F0EA4CA /* MusicGlassShortcuts.swift */,
+			);
+			path = Intents;
 			sourceTree = "<group>";
 		};
 		F16DAE7BA4694149A79D106B /* Services */ = {
@@ -105,6 +126,7 @@
 				34A754490E5E420E89A48B16 /* SearchView.swift */,
 				FC93FD9930FB4ED38972838D /* SettingsView.swift */,
 				3E85C816B4BF46E7BB9DFC9E /* SongRow.swift */,
+				B6974F46775A4B2882312546 /* DiscoverView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -125,6 +147,7 @@
 				96DFA113829E4FFEBDCB9A2E /* Models */,
 				F16DAE7BA4694149A79D106B /* Services */,
 				15F51B2B640A41A9B8F05208 /* Views */,
+				7223275F4E00415F9048F744 /* Intents */,
 				EA05C569BF4344809839A1A3 /* Resources */,
 			);
 			path = MusicGlass;
@@ -233,6 +256,11 @@
 				D4FCB15F10AD44B285886C19 /* SearchView.swift in Sources */,
 				B8DED8B4FB7242519EF9981A /* SettingsView.swift in Sources */,
 				31D08A4D044445BFBB65E042 /* SongRow.swift in Sources */,
+				DAB0BCF27DD8429F8CFDFEF0 /* DiscoverView.swift in Sources */,
+				A6EC2D1218E44DA6983DB63C /* MusicGlassActivityAttributes.swift in Sources */,
+				B4ACE4CFCAB149889A88B3CA /* PlayMediaIntent.swift in Sources */,
+				87E03DD4C695470A81920FC0 /* TogglePlaybackIntent.swift in Sources */,
+				A40FB9FB371748EA98F823A7 /* MusicGlassShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
