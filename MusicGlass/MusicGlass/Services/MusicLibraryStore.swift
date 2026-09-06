@@ -188,6 +188,11 @@ final class MusicLibraryStore: ObservableObject {
         guard !term.isEmpty else {
             searchResults = .init()
             searchHints = []
+            // `errorMessage` is shared app-wide (Library/Settings read it
+            // too) — clearing the search box should clear a search failure
+            // along with the results, or a stale search error could later
+            // show up on an unrelated screen that also happens to be empty.
+            errorMessage = nil
             return
         }
         searchTask = Task {
@@ -420,24 +425,15 @@ final class MusicLibraryStore: ObservableObject {
     /// Fills the search field with a tapped hint and searches immediately,
     /// bypassing the debounce since the user has already committed to it.
     func selectSearchHint(_ hint: String) {
-        searchTask?.cancel()
-        searchText = hint
+        // Just update the text — SearchView's `.onChange(of: searchText)`
+        // calls `performSearchDebounced()` for us. This used to also kick
+        // off its own immediate, non-debounced search here, but that search
+        // and the one `.onChange` triggers a moment later both mutate
+        // `searchTask`, so the immediate one was always cancelled by the
+        // debounced one before it could return — wasted work with no
+        // behavioral upside, just duplicated logic.
         searchHints = []
-        searchTask = Task {
-            isSearching = true
-            defer { isSearching = false }
-            do {
-                let results = try await bridge.search(term: hint)
-                if !Task.isCancelled {
-                    searchResults = results
-                    errorMessage = nil
-                }
-            } catch {
-                if !Task.isCancelled {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
+        searchText = hint
     }
 
     // MARK: - Queue (Up Next)
