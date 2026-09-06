@@ -178,13 +178,21 @@
   function mapQueueItem(item) {
     const attrs = item.attributes || {};
     const artwork = item.artwork || attrs.artwork;
+    // Live radio stations report `playbackDuration === Infinity`, which
+    // bridges to the native side as a JS Infinity value that later crashes
+    // NSJSONSerialization outright (see MusicKitBridge.swift's `call<T>` and
+    // `nowPlayingItemDidChange`) — finite-check it here at the source rather
+    // than relying only on the native-side guard.
+    const computedDuration = item.playbackDuration && isFinite(item.playbackDuration)
+      ? Math.round(item.playbackDuration * 1000)
+      : null;
     return {
       id: item.id || attrs.id || '',
       name: item.title || attrs.name || '',
       artistName: item.artistName || attrs.artistName || '',
       albumName: item.albumName || attrs.albumName || null,
       artwork: artwork ? { width: artwork.width, height: artwork.height, url: artwork.url } : null,
-      durationInMillis: item.playbackDuration ? Math.round(item.playbackDuration * 1000) : (attrs.durationInMillis || null)
+      durationInMillis: computedDuration || attrs.durationInMillis || null
     };
   }
 

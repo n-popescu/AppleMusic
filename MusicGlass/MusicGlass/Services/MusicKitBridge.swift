@@ -366,6 +366,21 @@ final class MusicKitBridge: NSObject, ObservableObject {
         } catch {
             throw MusicKitBridgeError.javascriptError(error.localizedDescription)
         }
+        // `JSONSerialization.data(withJSONObject:options:)` raises a raw
+        // Objective-C exception (NSInvalidArgumentException), not a catchable
+        // Swift error, if `result`'s object graph contains anything outside
+        // strict JSON types anywhere in it — most commonly a NaN/Infinity
+        // number (e.g. a live radio station's `duration` bridging to
+        // `Infinity`) or a non-array/dictionary top-level value. `try?`
+        // around that call does nothing to stop it: it isn't a Swift `throw`,
+        // it's `objc_exception_throw`, which aborts the process. This crashed
+        // real devices on search/library/discover alike, since they all
+        // funnel through this one function. `isValidJSONObject` performs the
+        // same recursive check but reports the result as a plain `Bool`
+        // instead of throwing, so it's safe to call first.
+        guard JSONSerialization.isValidJSONObject(result) else {
+            throw MusicKitBridgeError.decodingFailed
+        }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: result, options: []) else {
             throw MusicKitBridgeError.decodingFailed
         }
@@ -467,7 +482,13 @@ extension MusicKitBridge: WKScriptMessageHandler {
             isAuthorized = (body["isAuthorized"] as? Bool) ?? false
 
         case "nowPlayingItemDidChange":
-            if let data = try? JSONSerialization.data(withJSONObject: body["item"] ?? [:]),
+            // Same NSInvalidArgumentException hazard as `call<T>` below (see
+            // its comment) — a live radio station's `playbackDuration` often
+            // bridges to JS `Infinity`, which `isValidJSONObject` catches
+            // before `data(withJSONObject:)` gets a chance to abort the process.
+            let item = body["item"] ?? [:]
+            if JSONSerialization.isValidJSONObject(item),
+               let data = try? JSONSerialization.data(withJSONObject: item),
                let info = try? JSONDecoder().decode(NowPlayingInfo.self, from: data) {
                 nowPlaying = info
             }
