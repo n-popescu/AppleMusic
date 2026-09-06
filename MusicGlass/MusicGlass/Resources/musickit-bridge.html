@@ -297,6 +297,28 @@
     return out;
   }
 
+  // Every library/track/artist-albums fetch used to request a single page
+  // (limit: 50/100, whichever the endpoint's max is) and stop there, so
+  // anyone with more items than that page size silently only ever saw the
+  // first page — no error, just a truncated list. Apple's API returns a
+  // `next` field (a ready-to-use path with its own offset/limit baked in)
+  // whenever more results exist; this follows it until exhausted. Capped at
+  // 20 pages (2000 items at limit 100) as a sanity bound, not a real limit
+  // anyone is likely to hit.
+  async function fetchAllPages(m, path, params) {
+    let all = [];
+    let nextPath = path;
+    let nextParams = params;
+    for (let page = 0; page < 20; page++) {
+      const res = await m.api.music(nextPath, nextParams);
+      all = all.concat(res.data.data || []);
+      if (!res.data.next) break;
+      nextPath = res.data.next;
+      nextParams = undefined;
+    }
+    return all;
+  }
+
   // Client-side fallback used by playNext/playLater when MusicKit JS's own
   // `playNext`/`playLater` aren't available: rebuilds the queue array with
   // the new item spliced in either right after the current track ('next') or
@@ -576,29 +598,25 @@
     // ---- Library ----
     fetchLibraryPlaylists: async function () {
       const m = requireMusic();
-      const res = await m.api.music('/v1/me/library/playlists', { limit: 100 });
-      const data = res.data.data || [];
+      const data = await fetchAllPages(m, '/v1/me/library/playlists', { limit: 100 });
       return mapSafely(data, d => mapPlaylistAttributes(d.id, d.attributes, true), 'library playlist');
     },
 
     fetchLibraryAlbums: async function () {
       const m = requireMusic();
-      const res = await m.api.music('/v1/me/library/albums', { limit: 100 });
-      const data = res.data.data || [];
+      const data = await fetchAllPages(m, '/v1/me/library/albums', { limit: 100 });
       return mapSafely(data, d => mapAlbumAttributes(d.id, d.attributes, true), 'library album');
     },
 
     fetchLibraryArtists: async function () {
       const m = requireMusic();
-      const res = await m.api.music('/v1/me/library/artists', { limit: 100 });
-      const data = res.data.data || [];
+      const data = await fetchAllPages(m, '/v1/me/library/artists', { limit: 100 });
       return mapSafely(data, d => mapArtistAttributes(d.id, d.attributes), 'library artist');
     },
 
     fetchLibrarySongs: async function () {
       const m = requireMusic();
-      const res = await m.api.music('/v1/me/library/songs', { limit: 100 });
-      const data = res.data.data || [];
+      const data = await fetchAllPages(m, '/v1/me/library/songs', { limit: 100 });
       return mapSafely(data, d => mapSongAttributes(d.id, d.attributes, true), 'library song');
     },
 
@@ -610,9 +628,8 @@
       const path = isLibrary
         ? `/v1/me/library/playlists/${id}/tracks`
         : `/v1/catalog/${m.storefrontId || 'us'}/playlists/${id}/tracks`;
-      const res = await m.api.music(path, { limit: 100 });
-      const data = res.data.data || [];
-      return data.map(d => mapSongAttributes(d.id, d.attributes, !!isLibrary));
+      const data = await fetchAllPages(m, path, { limit: 100 });
+      return mapSafely(data, d => mapSongAttributes(d.id, d.attributes, !!isLibrary), 'playlist track');
     },
 
     fetchAlbumTracks: async function (id, isLibrary) {
@@ -620,9 +637,8 @@
       const path = isLibrary
         ? `/v1/me/library/albums/${id}/tracks`
         : `/v1/catalog/${m.storefrontId || 'us'}/albums/${id}/tracks`;
-      const res = await m.api.music(path, { limit: 100 });
-      const data = res.data.data || [];
-      return data.map(d => mapSongAttributes(d.id, d.attributes, !!isLibrary));
+      const data = await fetchAllPages(m, path, { limit: 100 });
+      return mapSafely(data, d => mapSongAttributes(d.id, d.attributes, !!isLibrary), 'album track');
     },
 
     // Catalog-only: works for any artist ID with the artist's catalog albums.
@@ -631,9 +647,8 @@
     fetchArtistAlbums: async function (id) {
       const m = requireMusic();
       const storefront = m.storefrontId || 'us';
-      const res = await m.api.music(`/v1/catalog/${storefront}/artists/${id}/albums`, { limit: 50 });
-      const data = res.data.data || [];
-      return data.map(d => mapAlbumAttributes(d.id, d.attributes, false));
+      const data = await fetchAllPages(m, `/v1/catalog/${storefront}/artists/${id}/albums`, { limit: 50 });
+      return mapSafely(data, d => mapAlbumAttributes(d.id, d.attributes, false), 'artist album');
     },
 
     // ---- Queue (Up Next) ----
