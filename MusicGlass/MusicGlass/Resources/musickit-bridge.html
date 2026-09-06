@@ -227,8 +227,15 @@
   function mapSongAttributes(id, a, isLibrary) {
     return {
       id: id,
-      name: a.name,
-      artistName: a.artistName,
+      // `name`/`artistName` decode into non-optional Swift Strings
+      // (Song.title/artistName) — a real catalog item genuinely missing one
+      // of these (confirmed via a "Key 'artistName' not found" decode error
+      // 447 items into a real fetch) means the resulting object has no key
+      // for it at all, which fails decoding the *entire* array natively,
+      // not just that one item — mapSafely's per-item try/catch can't catch
+      // this since building the object literal itself never throws.
+      name: a.name || '',
+      artistName: a.artistName || '',
       albumName: a.albumName || null,
       durationInMillis: a.durationInMillis || null,
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
@@ -242,8 +249,9 @@
   function mapAlbumAttributes(id, a, isLibrary) {
     return {
       id: id,
-      name: a.name,
-      artistName: a.artistName,
+      // See mapSongAttributes above for why these can't be left undefined.
+      name: a.name || '',
+      artistName: a.artistName || '',
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
       trackCount: a.trackCount || null,
       releaseDate: a.releaseDate || null,
@@ -281,7 +289,8 @@
   function mapStationAttributes(id, a) {
     return {
       id: id,
-      name: a.name,
+      // See mapSongAttributes above for why this can't be left undefined.
+      name: a.name || '',
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
       isLive: !!a.isLive,
       playParams: a.playParams
@@ -293,7 +302,8 @@
   function mapArtistAttributes(id, a) {
     return {
       id: id,
-      name: a.name,
+      // See mapSongAttributes above for why this can't be left undefined.
+      name: a.name || '',
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null
     };
   }
@@ -301,7 +311,8 @@
   function mapPlaylistAttributes(id, a, isLibrary) {
     return {
       id: id,
-      name: a.name,
+      // See mapSongAttributes above for why this can't be left undefined.
+      name: a.name || '',
       curatorName: a.curatorName || null,
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
       trackCount: a.trackCount || null,
