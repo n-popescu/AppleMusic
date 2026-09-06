@@ -38,6 +38,17 @@ jobs:
       ARCHIVE_PATH: ${{ github.workspace }}/build/MusicGlass.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
       IPA_NAME: Lucent-1.0.0-unsigned.ipa
+      # The user-facing version (Settings → Account shows "Version X (build
+      # N)", and this is X) auto-bumps every build from here on, the same
+      # way CURRENT_PROJECT_VERSION below already did — both are overridden
+      # at the xcodebuild command line, never written back to the pbxproj,
+      # so there's no extra commit and no drift between what's built and
+      # what the project file says. The release tag/filename deliberately
+      # stay fixed at v1.0.0/Lucent-1.0.0-unsigned.ipa regardless (see the
+      # `release` job below) — that fixed URL is what SideStore/AltStore's
+      # source (apps.json) depends on to keep updating in place without
+      # anyone re-adding it.
+      MARKETING_VERSION: 1.0.${{ github.run_number }}
       # `secrets` can't be referenced in an `if:` expression, only in `env:`/
       # `with:` mappings — so it's promoted to a job-level env var here, and
       # the injection step below checks `env.MUSICKIT_DEVELOPER_TOKEN` instead.
@@ -67,14 +78,15 @@ jobs:
       - name: Build & archive (unsigned)
         run: |
           set -euo pipefail
-          # CURRENT_PROJECT_VERSION (-> CFBundleVersion) is overridden to this
-          # run's unique number rather than left at whatever's hardcoded in
-          # the pbxproj. MARKETING_VERSION (1.0.0) never changes between CI
-          # runs, and several sideloading tools (AltStore, Sideloadly) key
-          # "is this already installed" off CFBundleVersion+CFBundleShortVersionString
-          # together — with both identical across every release, they can
-          # silently skip a real reinstall and leave a stale build's crash
-          # (or bug) looking unfixed even after the .ipa itself was rebuilt.
+          # Both CURRENT_PROJECT_VERSION (-> CFBundleVersion) and
+          # MARKETING_VERSION (-> CFBundleShortVersionString) are overridden
+          # here to values that change on every run, rather than left at
+          # whatever's hardcoded in the pbxproj. Several sideloading tools
+          # (AltStore, Sideloadly) key "is this already installed" off both
+          # of those together — with either one identical across every
+          # release, they can silently skip a real reinstall and leave a
+          # stale build's crash (or bug) looking unfixed even after the .ipa
+          # itself was rebuilt.
           xcodebuild \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
@@ -87,6 +99,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
             clean archive
 
       - name: Package unsigned .ipa from the .xcarchive
@@ -126,8 +139,16 @@ jobs:
     runs-on: ubuntu-latest
     # Only cut/update a release from pushes to main (not PRs, not manual
     # workflow_dispatch runs from other branches) — this reuses the same
-    # v1.0.0 tag/release on every push to main until the version is bumped.
+    # v1.0.0 tag/release on every push to main; only the app's own version
+    # (MARKETING_VERSION, baked in at build time) bumps every run, not the
+    # tag/release/filename — see build-unsigned-ipa's env comment for why.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    env:
+      # Recomputed independently rather than passed as a job output — it's a
+      # pure function of github.run_number, which is already identical and
+      # available in both jobs of this same workflow run.
+      MARKETING_VERSION: 1.0.${{ github.run_number }}
 
     steps:
       - name: Checkout
@@ -143,10 +164,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.0
-          name: Lucent 1.0.0
+          name: Lucent ${{ env.MARKETING_VERSION }}
           body: |
-            Automated build of Lucent 1.0.0 (build ${{ github.run_number }}, commit
-            ${{ github.sha }}) — **unsigned** `.ipa`, produced with
+            Automated build of Lucent ${{ env.MARKETING_VERSION }} (build
+            ${{ github.run_number }}, commit ${{ github.sha }}) — **unsigned**
+            `.ipa`, produced with
             `CODE_SIGNING_ALLOWED=NO` (see `.github/workflows/ios-build.yml`).
             There is no signing certificate or provisioning profile involved in
             this build. Resign it locally (`codesign` + your own provisioning

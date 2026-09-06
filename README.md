@@ -259,11 +259,24 @@ with its own certificate/profile secrets — intentionally out of scope here.
 **Auto-release:** on every push to `main` (not on PRs or non-`main`
 `workflow_dispatch` runs), a second job downloads that build's `.ipa` and
 publishes/updates a GitHub Release tagged `v1.0.0` with the ipa attached as a
-release asset, via `softprops/action-gh-release`. The app version currently
-lives in the Xcode project's `MARKETING_VERSION` build setting (`1.0.0`,
-`CURRENT_PROJECT_VERSION` build number `1`) — bump both there and change the
-workflow's `tag_name`/`IPA_NAME`/release `name` to cut a new versioned release
-instead of overwriting `v1.0.0`.
+release asset, via `softprops/action-gh-release`.
+
+**Versioning:** both `MARKETING_VERSION` (`CFBundleShortVersionString` —
+shown as "Version X" in Settings → Account) and `CURRENT_PROJECT_VERSION`
+(`CFBundleVersion`, the "build N" part) are overridden at the `xcodebuild`
+command line on every run — `1.0.$GITHUB_RUN_NUMBER` and
+`$GITHUB_RUN_NUMBER` respectively — rather than left at whatever's
+hardcoded in the pbxproj (`1.0.0`/`1`, unchanged there). Both auto-bump on
+every single push; there's nothing to remember to do manually. The
+`v1.0.0` release tag, the release's title, and the `.ipa`'s filename stay
+fixed on purpose regardless of that — see the `build-unsigned-ipa` job's
+env comment for why (`apps.json`, the SideStore/AltStore source below,
+depends on that URL never moving).
+
+If a real major/minor bump is ever wanted (not just the automatic patch
+increment), change the `1.0` prefix in `MARKETING_VERSION` at the top of
+`build-unsigned-ipa`'s `env:` block (and the matching line in the `release`
+job) — that's the only place it's set.
 
 ### Baking the MusicKit developer token into CI builds
 

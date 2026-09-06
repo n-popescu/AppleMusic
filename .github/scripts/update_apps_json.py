@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Regenerates apps.json (the SideStore/AltStore source file) for the
-current CI build. Reads RUN_NUMBER, COMMIT_SHA, and IPA_SIZE from the
-environment (set by .github/workflows/ios-build.yml) and writes the result
-to apps.json in the current working directory.
+current CI build. Reads RUN_NUMBER, COMMIT_SHA, IPA_SIZE, BUILD_DATE, and
+MARKETING_VERSION from the environment (set by
+.github/workflows/ios-build.yml) and writes the result to apps.json in the
+current working directory.
 """
 import json
 import os
@@ -11,6 +12,11 @@ RUN_NUMBER = os.environ["RUN_NUMBER"]
 COMMIT_SHA = os.environ["COMMIT_SHA"]
 IPA_SIZE = int(os.environ["IPA_SIZE"])
 BUILD_DATE = os.environ["BUILD_DATE"]
+# Matches whatever MARKETING_VERSION was actually baked into this build (see
+# ios-build.yml's build-unsigned-ipa job) — it auto-bumps every run now, so
+# this must not be hardcoded or SideStore would show a version that doesn't
+# match what Settings reports inside the app itself.
+MARKETING_VERSION = os.environ["MARKETING_VERSION"]
 
 data = {
     "name": "Lucent",
@@ -32,7 +38,7 @@ data = {
             "category": "music",
             "versions": [
                 {
-                    "version": "1.0.0",
+                    "version": MARKETING_VERSION,
                     "buildVersion": RUN_NUMBER,
                     "date": BUILD_DATE,
                     "size": IPA_SIZE,
