@@ -211,6 +211,19 @@ with its own certificate/profile secrets — intentionally out of scope here.
 
 ---
 
+## AirPlay
+
+`Views/AirPlayButton.swift` wraps `AVRoutePickerView` (AVKit) so the Now
+Playing screen has an inline AirPlay route picker next to the "Up Next"
+button. No custom streaming/casting protocol is implemented — audio played
+inside the hidden `WKWebView` already goes through the shared
+`AVAudioSession` (configured for `.playback` in `MusicGlassApp`), so iOS
+already exposes AirPlay output routing automatically via Control Center; this
+button just surfaces that same system picker without the user needing to
+leave the app.
+
+---
+
 ## Explicitly out of scope
 
 Carried over from the original project spec — not implemented, and not
@@ -222,6 +235,10 @@ planned as part of this pass:
   downloads the way native MusicKit's `MusicLibrary` does.
 - **Lyrics**.
 - **Social features** (sharing, friend activity, etc).
+- **Discord Rich Presence / Last.fm scrobbling** — considered (inspired by
+  the discontinued Cider desktop client) and deliberately skipped: Discord's
+  Rich Presence protocol is IPC-based and only available to desktop clients,
+  not third-party iOS apps, and Last.fm scrobbling was explicitly declined.
 - **Dynamic backend-issued developer tokens** — the developer token is a
   static value pasted into `Info.plist` (see step 1). A shipped app should
   fetch a fresh one from a small backend instead, since tokens expire.

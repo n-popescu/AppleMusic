@@ -84,13 +84,25 @@ struct NowPlayingFullView: View {
                 }
                 .foregroundStyle(.white)
 
-                Button {
-                    showQueue = true
-                } label: {
-                    Label("Up Next", systemImage: "list.bullet")
-                        .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 16) {
+                    Button {
+                        showQueue = true
+                    } label: {
+                        Label("Up Next", systemImage: "list.bullet")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .buttonStyle(GlassButtonStyle())
+
+                    AirPlayButton(tintColor: .white)
+                        .frame(width: 44, height: 44)
+                        .background {
+                            if #available(iOS 26.0, *) {
+                                Circle().fill(.clear).glassEffect(.regular, in: Circle())
+                            } else {
+                                Circle().fill(.ultraThinMaterial)
+                            }
+                        }
                 }
-                .buttonStyle(GlassButtonStyle())
                 .foregroundStyle(.white)
 
                 Spacer()
