@@ -6,17 +6,49 @@ import Combine
 enum MusicKitBridgeError: LocalizedError {
     case notReady
     case javascriptError(String)
-    case decodingFailed
+    case decodingFailed(String? = nil)
     case unauthorized
 
     var errorDescription: String? {
         switch self {
         case .notReady: return "The Apple Music engine isn't ready yet."
         case .javascriptError(let message): return message
-        case .decodingFailed: return "Couldn't understand the response from Apple Music."
+        case .decodingFailed(let detail):
+            let base = "Couldn't understand the response from Apple Music."
+            return detail.map { "\(base) (\($0))" } ?? base
         case .unauthorized: return "Not signed in to Apple Music."
         }
     }
+}
+
+/// Walks a JS-bridged value depth-first and describes the first thing that
+/// makes it unrepresentable as strict JSON — almost always a NaN/Infinity
+/// NSNumber (e.g. a live radio station's `Infinity` duration) or a raw
+/// non-container value at the top level. Purely diagnostic: used to turn
+/// "Couldn't understand the response" into something a bug report can
+/// actually act on, since this project has no way to attach a debugger.
+private func describeFirstInvalidJSONValue(_ value: Any, path: String = "root") -> String? {
+    if let number = value as? NSNumber {
+        // NSNumber also boxes Bool; only doubles/floats can be non-finite.
+        let double = number.doubleValue
+        if double.isNaN { return "\(path) is NaN" }
+        if double.isInfinite { return "\(path) is Infinite" }
+        return nil
+    }
+    if value is NSString || value is NSNull { return nil }
+    if let array = value as? [Any] {
+        for (index, element) in array.enumerated() {
+            if let found = describeFirstInvalidJSONValue(element, path: "\(path)[\(index)]") { return found }
+        }
+        return nil
+    }
+    if let dict = value as? [String: Any] {
+        for (key, element) in dict {
+            if let found = describeFirstInvalidJSONValue(element, path: "\(path).\(key)") { return found }
+        }
+        return nil
+    }
+    return "\(path) is an unsupported type (\(type(of: value)))"
 }
 
 /// Events pushed asynchronously from MusicKit JS -> native, via `webkit.messageHandlers.musicKitEvent`.
@@ -379,15 +411,15 @@ final class MusicKitBridge: NSObject, ObservableObject {
         // same recursive check but reports the result as a plain `Bool`
         // instead of throwing, so it's safe to call first.
         guard JSONSerialization.isValidJSONObject(result) else {
-            throw MusicKitBridgeError.decodingFailed
+            throw MusicKitBridgeError.decodingFailed(describeFirstInvalidJSONValue(result))
         }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: result, options: []) else {
-            throw MusicKitBridgeError.decodingFailed
+            throw MusicKitBridgeError.decodingFailed()
         }
         do {
             return try JSONDecoder().decode(T.self, from: jsonData)
         } catch {
-            throw MusicKitBridgeError.decodingFailed
+            throw MusicKitBridgeError.decodingFailed("\(error)")
         }
     }
 
