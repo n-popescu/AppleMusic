@@ -118,10 +118,24 @@ final class MusicLibraryStore: ObservableObject {
     func signOut() async {
         do {
             try await bridge.unauthorize()
+            // Clear every piece of account-scoped state, not just the
+            // library grids — this app's whole premise is signing in as a
+            // *different* Apple ID than the device's own, so leaving the
+            // previous account's recommendations/charts/history/queue
+            // sitting around after sign-out (until a new sign-in eventually
+            // overwrites them) is stale data leaking across accounts, not
+            // just a cosmetic staleness issue.
             playlists = []
             albums = []
             artists = []
             songs = []
+            recommendations = []
+            charts = .init()
+            stations = []
+            recentlyPlayedHistory = []
+            recentlyPlayed = []
+            queue = .empty
+            hasLoadedLibraryOnce = false
         } catch {
             errorMessage = error.localizedDescription
         }
