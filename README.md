@@ -306,6 +306,36 @@ after someone signs in) — but it's still your account's credential being
 distributed publicly. Only add the secret if you're fine with that trade-off
 for this project.
 
+### Installing via SideStore/AltStore instead of downloading each release
+
+Rather than grabbing `Lucent-1.0.0-unsigned.ipa` from the Releases page by
+hand every time, add this repo as a **source** in SideStore (or AltStore):
+
+1. In SideStore: **Sources → + → Add Source**.
+2. Paste:
+   `https://raw.githubusercontent.com/n-popescu/AppleMusic/main/apps.json`
+3. Lucent shows up as an installable app. Installing/updating through the
+   source has SideStore do the signing itself (the same thing you'd
+   otherwise do manually with a resigning tool), so there's no separate
+   "download the unsigned ipa, then resign it" step.
+
+`apps.json` at the repo root is that source file, in the standard
+AltStore/SideStore format. The `release` job in
+`.github/workflows/ios-build.yml` regenerates it (real build number, file
+size, timestamp) and commits it straight back to `main` after every
+successful build, via `.github/scripts/update_apps_json.py` — so once the
+source is added, SideStore's own periodic refresh (or a manual pull in the
+app) is all that's needed to pick up a new build; nothing to re-add or
+re-download. That commit is authored by `github-actions[bot]` and is the one
+kind of push to `main` this workflow doesn't rebuild for — `apps.json` is in
+the trigger's `paths-ignore`, since building for it would just commit another
+`apps.json` update, forever.
+
+The `bundleIdentifier` in `apps.json` (`com.lucent.app`) has to match
+`PRODUCT_BUNDLE_IDENTIFIER` in the Xcode project — if that's ever changed,
+`.github/scripts/update_apps_json.py` needs the same edit or SideStore will
+treat every install as a brand new app rather than an update.
+
 ---
 
 ## Shuffle, Repeat, Volume

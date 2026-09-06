@@ -13,6 +13,12 @@ on:
   push:
     branches:
       - main
+    # The release job commits apps.json (the SideStore/AltStore source file)
+    # straight back to main after every build. Without this, that commit
+    # would itself trigger a new push event -> new workflow run -> new
+    # apps.json commit -> forever.
+    paths-ignore:
+      - 'apps.json'
   pull_request:
     branches:
       - main
@@ -124,6 +130,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download unsigned IPA artifact
         uses: actions/download-artifact@v4
         with:
@@ -149,4 +158,35 @@ jobs:
             should show build ${{ github.run_number }}. If it still shows an
             older build number, force a full uninstall/reinstall rather than
             an in-place update.
+
+            **SideStore/AltStore users:** add
+            `https://raw.githubusercontent.com/n-popescu/AppleMusic/main/apps.json`
+            as a source instead of downloading this asset by hand — it always
+            points at the latest build and SideStore can refresh from it.
           files: build/output/Lucent-1.0.0-unsigned.ipa
+
+      # Regenerates apps.json (the SideStore/AltStore source file) with this
+      # build's real version/date/size, then commits it straight to main so
+      # https://raw.githubusercontent.com/.../apps.json always reflects the
+      # latest release without a separate manual step. Kept as its own step
+      # (rather than folded into the release step above) so a failure here
+      # doesn't retroactively undo a release that already published fine.
+      - name: Update SideStore/AltStore source (apps.json)
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export IPA_SIZE=$(stat -c%s "build/output/Lucent-1.0.0-unsigned.ipa")
+          export BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          python3 .github/scripts/update_apps_json.py
+
+          if git diff --quiet -- apps.json; then
+            echo "apps.json unchanged, nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps.json
+          git commit -m "Update SideStore/AltStore source (build $RUN_NUMBER) [skip ci]"
+          git push origin HEAD:main

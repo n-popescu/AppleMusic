@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Regenerates apps.json (the SideStore/AltStore source file) for the
+current CI build. Reads RUN_NUMBER, COMMIT_SHA, and IPA_SIZE from the
+environment (set by .github/workflows/ios-build.yml) and writes the result
+to apps.json in the current working directory.
+"""
+import json
+import os
+
+RUN_NUMBER = os.environ["RUN_NUMBER"]
+COMMIT_SHA = os.environ["COMMIT_SHA"]
+IPA_SIZE = int(os.environ["IPA_SIZE"])
+BUILD_DATE = os.environ["BUILD_DATE"]
+
+data = {
+    "name": "Lucent",
+    "identifier": "com.lucent.source",
+    "sourceURL": "https://raw.githubusercontent.com/n-popescu/AppleMusic/main/apps.json",
+    "apps": [
+        {
+            "name": "Lucent",
+            "bundleIdentifier": "com.lucent.app",
+            "developerName": "n-popescu",
+            "subtitle": "Sign into a different Apple Music account than your device's",
+            "localizedDescription": (
+                "A native SwiftUI Apple Music client that signs in through "
+                "Apple's own music.apple.com — independent of whichever "
+                "Apple ID this iPhone uses for iCloud. Unsigned build; "
+                "SideStore/AltStore handles signing and installation."
+            ),
+            "iconURL": "https://raw.githubusercontent.com/n-popescu/AppleMusic/main/MusicGlass/MusicGlass/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+            "category": "music",
+            "versions": [
+                {
+                    "version": "1.0.0",
+                    "buildVersion": RUN_NUMBER,
+                    "date": BUILD_DATE,
+                    "size": IPA_SIZE,
+                    "minOSVersion": "17.0",
+                    "downloadURL": "https://github.com/n-popescu/AppleMusic/releases/download/v1.0.0/Lucent-1.0.0-unsigned.ipa",
+                    "localizedDescription": "Build {} (commit {})".format(RUN_NUMBER, COMMIT_SHA[:7]),
+                }
+            ],
+        }
+    ],
+}
+
+with open("apps.json", "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")

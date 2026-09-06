@@ -1,0 +1,27 @@
+{
+  "name": "Lucent",
+  "identifier": "com.lucent.source",
+  "sourceURL": "https://raw.githubusercontent.com/n-popescu/AppleMusic/main/apps.json",
+  "apps": [
+    {
+      "name": "Lucent",
+      "bundleIdentifier": "com.lucent.app",
+      "developerName": "n-popescu",
+      "subtitle": "Sign into a different Apple Music account than your device's",
+      "localizedDescription": "A native SwiftUI Apple Music client that signs in through Apple's own music.apple.com — independent of whichever Apple ID this iPhone uses for iCloud. Unsigned build; SideStore/AltStore handles signing and installation.",
+      "iconURL": "https://raw.githubusercontent.com/n-popescu/AppleMusic/main/MusicGlass/MusicGlass/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+      "category": "music",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "buildVersion": "0",
+          "date": "2026-09-06T00:00:00Z",
+          "size": 0,
+          "minOSVersion": "17.0",
+          "downloadURL": "https://github.com/n-popescu/AppleMusic/releases/download/v1.0.0/Lucent-1.0.0-unsigned.ipa",
+          "localizedDescription": "Placeholder entry — CI overwrites this with real build/size/date metadata on the next push to main."
+        }
+      ]
+    }
+  ]
+}
