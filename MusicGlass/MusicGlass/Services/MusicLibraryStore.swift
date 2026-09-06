@@ -49,6 +49,23 @@ final class MusicLibraryStore: ObservableObject {
     @Published var stations: [Station] = []
     @Published var isLoadingDiscover = false
 
+    // MARK: - Autoplay
+    //
+    // MusicKit JS has no exposed "continue with similar music" toggle or a
+    // verified way to derive a station from a specific song (unlike the
+    // native Music app's own Autoplay, which is backed by an internal
+    // recommendation algorithm this project has no access to) — checked
+    // against the real API surface rather than assumed, the same way every
+    // other bridge call in this project now is. So this is an honest
+    // approximation built entirely from endpoints already confirmed working
+    // elsewhere: when the queue plays out with Autoplay on, it starts
+    // something from whatever Discover already has (top chart song first,
+    // falling back to a recommended album/playlist), refreshing Discover
+    // first if it's empty. Session-only by design, same as MusicKit JS's
+    // own shuffle/repeat state — it doesn't persist across a relaunch.
+    @Published var isAutoplayEnabled = false
+    private var isHandlingAutoplay = false
+
     // MARK: - Search hints
 
     @Published var searchHints: [String] = []
@@ -70,6 +87,7 @@ final class MusicLibraryStore: ObservableObject {
     init(bridge: MusicKitBridge? = nil) {
         self.bridge = bridge ?? MusicKitBridge()
         observeNowPlayingForHistory()
+        observeAutoplay()
         Self.current = self
         loadCachedLibrary()
     }
@@ -180,6 +198,40 @@ final class MusicLibraryStore: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    /// `.ended`/`.completed` is what MusicKit JS reports once the whole
+    /// queue has genuinely played out (not between tracks *within* a
+    /// queue, which just advances on its own) — the right moment for
+    /// Autoplay to hand it something new.
+    private func observeAutoplay() {
+        bridge.$playbackStatus
+            .removeDuplicates()
+            .sink { [weak self] status in
+                guard let self, self.isAutoplayEnabled,
+                      status == .ended || status == .completed else { return }
+                Task { await self.playSomethingForAutoplay() }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func playSomethingForAutoplay() async {
+        guard !isHandlingAutoplay else { return }
+        isHandlingAutoplay = true
+        defer { isHandlingAutoplay = false }
+
+        if charts.songs.isEmpty && recommendations.isEmpty {
+            await refreshDiscover()
+        }
+        if let song = charts.songs.randomElement() {
+            await play(song: song)
+        } else if let recommendation = recommendations.first {
+            if let album = recommendation.album {
+                await play(album: album)
+            } else if let playlist = recommendation.playlist {
+                await play(playlist: playlist)
+            }
+        }
     }
 
     /// Runs a fire-and-forget bridge call, clearing any previous
@@ -512,11 +564,25 @@ final class MusicLibraryStore: ObservableObject {
 
     // MARK: - Shuffle / Repeat / Volume
 
+    /// True while a shuffle/repeat toggle is actually in flight. Every
+    /// bridge call (even one that's "just flipping a property" JS-side, no
+    /// network round trip involved) still goes through a full
+    /// `callAsyncJavaScript` round trip, which is real but easy to mistake
+    /// for "nothing happened" when the button gives no feedback in the
+    /// meantime — same class of issue play/pause/skip had before they got
+    /// isTransportBusy. This makes tapping shuffle/repeat show *something*
+    /// changing immediately instead of a silent gap before the icon updates.
+    @Published var isTogglingPlaybackMode = false
+
     func setShuffleMode(_ mode: ShuffleMode) async {
+        isTogglingPlaybackMode = true
+        defer { isTogglingPlaybackMode = false }
         await perform { try await self.bridge.setShuffleMode(mode) }
     }
 
     func cycleRepeatMode() async {
+        isTogglingPlaybackMode = true
+        defer { isTogglingPlaybackMode = false }
         await perform { try await self.bridge.setRepeatMode(self.bridge.repeatMode.next) }
     }
 

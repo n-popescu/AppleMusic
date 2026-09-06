@@ -115,11 +115,16 @@ struct NowPlayingFullView: View {
                         Button {
                             Task { await store.setShuffleMode(store.bridge.shuffleMode == .off ? .songs : .off) }
                         } label: {
-                            Image(systemName: "shuffle")
-                                .font(.system(size: 16, weight: .semibold))
+                            if store.isTogglingPlaybackMode {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: "shuffle")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
                         }
                         .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? .pink : nil))
                         .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
+                        .disabled(store.isTogglingPlaybackMode)
 
                         Button { Task { await store.skipToPrevious() } } label: {
                             Image(systemName: "backward.fill").font(.system(size: 22))
@@ -147,11 +152,16 @@ struct NowPlayingFullView: View {
                         Button {
                             Task { await store.cycleRepeatMode() }
                         } label: {
-                            Image(systemName: repeatIconName)
-                                .font(.system(size: 16, weight: .semibold))
+                            if store.isTogglingPlaybackMode {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: repeatIconName)
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
                         }
                         .buttonStyle(GlassButtonStyle(tint: store.bridge.repeatMode == .off ? nil : .pink))
                         .foregroundStyle(store.bridge.repeatMode == .off ? .white.opacity(0.6) : .white)
+                        .disabled(store.isTogglingPlaybackMode)
                     }
                     .foregroundStyle(.white)
 
@@ -187,6 +197,25 @@ struct NowPlayingFullView: View {
                                 .font(.system(size: 14, weight: .semibold))
                         }
                         .buttonStyle(GlassButtonStyle())
+
+                        // Not a real MusicKit JS toggle — there's no
+                        // confirmed "continue with similar music" API to
+                        // hook into (unlike the native Music app's own
+                        // Autoplay, which runs on an internal recommendation
+                        // algorithm this project has no access to). This
+                        // flips MusicLibraryStore.isAutoplayEnabled, which
+                        // starts something from Discover's charts/
+                        // recommendations once the queue genuinely plays
+                        // out — an honest approximation, not the same
+                        // feature.
+                        Button {
+                            store.isAutoplayEnabled.toggle()
+                        } label: {
+                            Label("Autoplay", systemImage: "infinity")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .buttonStyle(GlassButtonStyle(tint: store.isAutoplayEnabled ? .pink : nil))
+                        .foregroundStyle(store.isAutoplayEnabled ? .white : .white.opacity(0.6))
 
                         AirPlayButton(tintColor: .white)
                             .frame(width: 44, height: 44)
