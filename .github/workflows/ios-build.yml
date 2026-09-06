@@ -32,6 +32,10 @@ jobs:
       ARCHIVE_PATH: ${{ github.workspace }}/build/MusicGlass.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
       IPA_NAME: Lucent-1.0.0-unsigned.ipa
+      # `secrets` can't be referenced in an `if:` expression, only in `env:`/
+      # `with:` mappings — so it's promoted to a job-level env var here, and
+      # the injection step below checks `env.MUSICKIT_DEVELOPER_TOKEN` instead.
+      MUSICKIT_DEVELOPER_TOKEN: ${{ secrets.MUSICKIT_DEVELOPER_TOKEN }}
 
     steps:
       - name: Checkout
@@ -46,9 +50,7 @@ jobs:
         run: xcodebuild -showsdks
 
       - name: Inject MusicKit developer token from secret
-        if: ${{ secrets.MUSICKIT_DEVELOPER_TOKEN != '' }}
-        env:
-          MUSICKIT_DEVELOPER_TOKEN: ${{ secrets.MUSICKIT_DEVELOPER_TOKEN }}
+        if: ${{ env.MUSICKIT_DEVELOPER_TOKEN != '' }}
         run: |
           set -euo pipefail
           echo "::add-mask::$MUSICKIT_DEVELOPER_TOKEN"
