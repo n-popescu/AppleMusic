@@ -373,13 +373,18 @@
     },
 
     // ---- Playlist create/edit ----
-    createPlaylist: async function (name, description, trackIds) {
+    // A library song's ID lives in a different namespace than a catalog
+    // song's, and Apple's API needs the relationship `type` to match which
+    // one it actually is ('library-songs' vs 'songs') — using the wrong one
+    // for a given ID silently fails to add the track (or errors outright).
+    createPlaylist: async function (name, description, trackIds, isLibrary) {
       const m = requireMusic();
+      const trackType = isLibrary ? 'library-songs' : 'songs';
       const attributes = { name: name };
       if (description) attributes.description = description;
       const body = { attributes: attributes };
       if (trackIds && trackIds.length) {
-        body.relationships = { tracks: { data: trackIds.map(id => ({ id: id, type: 'songs' })) } };
+        body.relationships = { tracks: { data: trackIds.map(id => ({ id: id, type: trackType })) } };
       }
       const res = await m.api.music('/v1/me/library/playlists', {}, {
         fetchOptions: { method: 'POST', body: JSON.stringify(body) }
@@ -392,9 +397,10 @@
       return { id: '', name: name, curatorName: null, artwork: null, trackCount: (trackIds || []).length, description: description || null, playParams: null };
     },
 
-    addTracksToPlaylist: async function (playlistId, trackIds) {
+    addTracksToPlaylist: async function (playlistId, trackIds, isLibrary) {
       const m = requireMusic();
-      const body = { data: trackIds.map(id => ({ id: id, type: 'songs' })) };
+      const trackType = isLibrary ? 'library-songs' : 'songs';
+      const body = { data: trackIds.map(id => ({ id: id, type: trackType })) };
       await m.api.music(`/v1/me/library/playlists/${playlistId}/tracks`, {}, {
         fetchOptions: { method: 'POST', body: JSON.stringify(body) }
       });

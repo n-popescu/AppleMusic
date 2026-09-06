@@ -330,9 +330,9 @@ final class MusicLibraryStore: ObservableObject {
     // MARK: - Playlist create/edit
 
     @discardableResult
-    func createPlaylist(name: String, description: String? = nil, trackIds: [String] = []) async -> Playlist? {
+    func createPlaylist(name: String, description: String? = nil, trackIds: [String] = [], isLibraryTracks: Bool = true) async -> Playlist? {
         do {
-            let playlist = try await bridge.createPlaylist(name: name, description: description, trackIds: trackIds)
+            let playlist = try await bridge.createPlaylist(name: name, description: description, trackIds: trackIds, isLibrary: isLibraryTracks)
             await refreshLibrary()
             return playlist
         } catch {
@@ -343,7 +343,7 @@ final class MusicLibraryStore: ObservableObject {
 
     func addTrack(_ song: Song, toPlaylist playlist: Playlist) async {
         do {
-            try await bridge.addTracksToPlaylist(playlistId: playlist.id, trackIds: [song.id])
+            try await bridge.addTracksToPlaylist(playlistId: playlist.id, trackIds: [song.id], isLibrary: song.playParams?.isLibrary ?? true)
         } catch {
             errorMessage = error.localizedDescription
         }

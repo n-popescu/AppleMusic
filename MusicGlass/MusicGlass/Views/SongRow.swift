@@ -216,7 +216,7 @@ struct AddToPlaylistSheet: View {
         defer { isCreating = false }
         let name = newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        _ = await store.createPlaylist(name: name, trackIds: [song.id])
+        _ = await store.createPlaylist(name: name, trackIds: [song.id], isLibraryTracks: song.playParams?.isLibrary ?? true)
         newPlaylistName = ""
         confirmationMessage = "Created \u{201c}\(name)\u{201d} and added the track."
     }

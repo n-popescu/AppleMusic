@@ -238,15 +238,20 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     // MARK: - Playlist create/edit
 
-    func createPlaylist(name: String, description: String?, trackIds: [String]) async throws -> Playlist {
+    /// `isLibrary` picks the relationship resource type for `trackIds`
+    /// (`library-songs` vs `songs`) — a library song's ID is a different ID
+    /// namespace than a catalog song's, so this must match whichever kind of
+    /// song these IDs actually are. Every real call site adds one song at a
+    /// time, always of one kind, so a single flag for the whole array is enough.
+    func createPlaylist(name: String, description: String?, trackIds: [String], isLibrary: Bool) async throws -> Playlist {
         let idsJSON = Self.jsStringArrayLiteral(trackIds)
         let descriptionJS = description.map { Self.jsStringLiteral($0) } ?? "null"
-        return try await call("return await MusicGlassBridge.createPlaylist(\(js: name), \(descriptionJS), \(idsJSON));")
+        return try await call("return await MusicGlassBridge.createPlaylist(\(js: name), \(descriptionJS), \(idsJSON), \(isLibrary));")
     }
 
-    func addTracksToPlaylist(playlistId: String, trackIds: [String]) async throws {
+    func addTracksToPlaylist(playlistId: String, trackIds: [String], isLibrary: Bool) async throws {
         let idsJSON = Self.jsStringArrayLiteral(trackIds)
-        try await callVoid("await MusicGlassBridge.addTracksToPlaylist(\(js: playlistId), \(idsJSON));")
+        try await callVoid("await MusicGlassBridge.addTracksToPlaylist(\(js: playlistId), \(idsJSON), \(isLibrary));")
     }
 
     // MARK: - Real recently played + discovery
