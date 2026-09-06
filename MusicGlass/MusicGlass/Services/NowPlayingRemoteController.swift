@@ -56,6 +56,18 @@ final class NowPlayingRemoteController {
             return
         }
 
+        // WebKit runs its own media-remote integration for the <audio>
+        // element MusicKit JS drives, and it configures the *shared*
+        // MPRemoteCommandCenter when that element starts playing — enabling
+        // its skip-interval commands and disabling next/previous track,
+        // which is what put "skip 10 seconds" buttons on the Lock Screen in
+        // place of real track controls. Our own setup only ran once at
+        // launch, before any playback existed, so WebKit's always won.
+        // Re-asserting it here (on every now-playing/state change, i.e.
+        // right after WebKit has done its thing) reclaims the command
+        // center each time.
+        applyCommandEnablement()
+
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: nowPlaying.title,
             MPMediaItemPropertyArtist: nowPlaying.artistName,
@@ -63,7 +75,12 @@ final class NowPlayingRemoteController {
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPMediaItemPropertyPlaybackDuration: max(duration, 0),
             MPNowPlayingInfoPropertyPlaybackRate: status.isPlaying ? 1.0 : 0.0,
-            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
+            // Declares this as music rather than letting the system infer a
+            // generic/video-ish type from the underlying web media element,
+            // which also influences which transport controls it offers.
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+            MPNowPlayingInfoPropertyIsLiveStream: false
         ]
 
         if cachedArtworkURLString == nowPlaying.artworkURL, let image = cachedArtworkImage {
@@ -140,9 +157,32 @@ final class NowPlayingRemoteController {
             return .success
         }
 
+        applyCommandEnablement()
+    }
+
+    /// Which transport controls the system offers, split out from
+    /// `configureRemoteCommands()` so it can be re-applied on every
+    /// now-playing update. The `addTarget` calls above must run exactly
+    /// once (re-adding would stack duplicate handlers, so one tap would
+    /// skip several tracks), but the `isEnabled` flags are just state on
+    /// the shared command center that WebKit's own media integration
+    /// overwrites when web audio starts playing — so those do need
+    /// re-asserting, and are safe to set repeatedly.
+    private func applyCommandEnablement() {
+        let center = MPRemoteCommandCenter.shared()
+
+        center.playCommand.isEnabled = true
+        center.pauseCommand.isEnabled = true
+        center.togglePlayPauseCommand.isEnabled = true
+        center.nextTrackCommand.isEnabled = true
+        center.previousTrackCommand.isEnabled = true
+        center.changePlaybackPositionCommand.isEnabled = true
+
         // Scrubbing/seeking-by-offset isn't meaningful for a streaming JS
         // player without a known seek granularity, so only position-based
-        // seeking (above) and the transport commands are enabled.
+        // seeking (above) and the transport commands are enabled. Leaving
+        // these on is also what makes the system show interval-skip buttons
+        // instead of previous/next.
         center.skipForwardCommand.isEnabled = false
         center.skipBackwardCommand.isEnabled = false
         center.seekForwardCommand.isEnabled = false

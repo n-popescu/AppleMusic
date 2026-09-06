@@ -59,6 +59,13 @@ struct GlassButtonStyle: ButtonStyle {
                     }
                 }
             )
+            // Without this the only hit-testable part of the button is the
+            // glyph itself: the padding is empty space, and the circular
+            // backdrop is a `.background` (never hit-tested) whose iOS 26
+            // fill is `.clear` (not hit-testable even where it is drawn).
+            // That made these buttons feel dead — taps in the ring around
+            // the icon fell straight through to whatever was behind them.
+            .contentShape(Circle())
             .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }

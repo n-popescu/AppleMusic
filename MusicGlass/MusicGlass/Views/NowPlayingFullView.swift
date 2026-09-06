@@ -13,161 +13,191 @@ struct NowPlayingFullView: View {
     var body: some View {
         let info = store.bridge.nowPlaying
 
-        ZStack {
-            // Blurred artwork backdrop for a "glass over content" feel.
-            AsyncImage(url: Artwork(width: nil, height: nil, url: info.artworkURL ?? "").resolvedURL(size: 1200)) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().aspectRatio(contentMode: .fill).blur(radius: 60).opacity(0.6)
+        GeometryReader { proxy in
+            // Artwork used to be pinned at 300pt regardless of the screen.
+            // Together with the fixed 28pt section spacing that overflowed
+            // the sheet on anything but the largest phones, squashing the
+            // controls below it. Sizing it from the space actually
+            // available keeps the whole stack on screen everywhere.
+            let artworkSize = max(min(proxy.size.width - 80, proxy.size.height * 0.38), 120)
+            let spacing = proxy.size.height < 700 ? 16.0 : 24.0
+
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                // Blurred artwork backdrop for a "glass over content" feel.
+                // This had no frame of its own, so with `.fill` it sized to
+                // the raw 1200pt artwork and dragged the entire ZStack out
+                // to those dimensions — which is what made this screen's
+                // layout go haywire. It has to be clamped to the view and
+                // clipped, not left to its intrinsic size.
+                AsyncImage(url: Artwork(width: nil, height: nil, url: info.artworkURL ?? "").resolvedURL(size: 1200)) { phase in
+                    if case .success(let image) = phase {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .blur(radius: 60)
+                            .opacity(0.6)
+                    }
                 }
-            }
-            Color.black.opacity(0.4).ignoresSafeArea()
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
+                .ignoresSafeArea()
 
-            VStack(spacing: 28) {
-                ZStack {
-                    Capsule()
-                        .fill(.white.opacity(0.3))
-                        .frame(width: 40, height: 5)
+                Color.black.opacity(0.4).ignoresSafeArea()
 
-                    HStack {
-                        Spacer()
-                        Menu {
-                            nowPlayingMenu
+                VStack(spacing: spacing) {
+                    ZStack {
+                        Capsule()
+                            .fill(.white.opacity(0.3))
+                            .frame(width: 40, height: 5)
+
+                        HStack {
+                            Spacer()
+                            Menu {
+                                nowPlayingMenu
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                    .contentShape(Circle())
+                            }
+                            .disabled(info.catalogID == nil)
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .padding(.top, 10)
+
+                    ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: artworkSize, cornerRadius: 24)
+                        .shadow(radius: 20)
+
+                    VStack(spacing: 6) {
+                        Text(info.title)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                        Text(info.artistName)
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(.horizontal, 24)
+
+                    VStack(spacing: 6) {
+                        Slider(
+                            value: Binding(
+                                get: { isScrubbing ? scrubberValue : store.bridge.currentTime },
+                                set: { scrubberValue = $0 }
+                            ),
+                            in: 0...(max(store.bridge.duration, 1)),
+                            onEditingChanged: { editing in
+                                isScrubbing = editing
+                                if !editing {
+                                    Task { try? await store.bridge.seek(to: scrubberValue) }
+                                }
+                            }
+                        )
+                        .tint(.white)
+
+                        HStack {
+                            Text(timeLabel(store.bridge.currentTime))
+                            Spacer()
+                            Text(timeLabel(store.bridge.duration))
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 24)
+
+                    // Five buttons at a fixed 28pt gap came to ~354pt, which
+                    // overflows the narrower phones once horizontal padding
+                    // is accounted for — hence the squeezed/clipped row.
+                    HStack(spacing: proxy.size.width < 380 ? 14 : 24) {
+                        Button {
+                            Task { await store.setShuffleMode(store.bridge.shuffleMode == .off ? .songs : .off) }
                         } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.system(size: 20))
-                                .foregroundStyle(.white.opacity(0.7))
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 16, weight: .semibold))
                         }
-                        .disabled(info.catalogID == nil)
+                        .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? .pink : nil))
+                        .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
+
+                        Button { Task { try? await store.bridge.skipToPrevious() } } label: {
+                            Image(systemName: "backward.fill").font(.system(size: 22))
+                        }
+                        .buttonStyle(GlassButtonStyle())
+
+                        Button { Task { try? await store.bridge.togglePlayPause() } } label: {
+                            Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 30))
+                        }
+                        .buttonStyle(GlassButtonStyle(tint: .pink))
+
+                        Button { Task { try? await store.bridge.skipToNext() } } label: {
+                            Image(systemName: "forward.fill").font(.system(size: 22))
+                        }
+                        .buttonStyle(GlassButtonStyle())
+
+                        Button {
+                            Task { await store.cycleRepeatMode() }
+                        } label: {
+                            Image(systemName: repeatIconName)
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .buttonStyle(GlassButtonStyle(tint: store.bridge.repeatMode == .off ? nil : .pink))
+                        .foregroundStyle(store.bridge.repeatMode == .off ? .white.opacity(0.6) : .white)
                     }
-                    .padding(.horizontal, 20)
-                }
-                .padding(.top, 10)
+                    .foregroundStyle(.white)
 
-                ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: 300, cornerRadius: 24)
-                    .shadow(radius: 20)
-
-                VStack(spacing: 6) {
-                    Text(info.title)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                    Text(info.artistName)
-                        .font(.system(size: 16))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-                .padding(.horizontal, 24)
-
-                VStack(spacing: 6) {
-                    Slider(
-                        value: Binding(
-                            get: { isScrubbing ? scrubberValue : store.bridge.currentTime },
-                            set: { scrubberValue = $0 }
-                        ),
-                        in: 0...(max(store.bridge.duration, 1)),
-                        onEditingChanged: { editing in
-                            isScrubbing = editing
-                            if !editing {
-                                Task { try? await store.bridge.seek(to: scrubberValue) }
+                    HStack(spacing: 10) {
+                        Image(systemName: "speaker.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Slider(
+                            value: Binding(
+                                get: { isAdjustingVolume ? volumeValue : store.bridge.volume },
+                                set: { volumeValue = $0 }
+                            ),
+                            in: 0...1,
+                            onEditingChanged: { editing in
+                                isAdjustingVolume = editing
+                                if !editing {
+                                    Task { await store.setVolume(volumeValue) }
+                                }
                             }
+                        )
+                        .tint(.white)
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    .padding(.horizontal, 24)
+
+                    HStack(spacing: 16) {
+                        Button {
+                            showQueue = true
+                        } label: {
+                            Label("Up Next", systemImage: "list.bullet")
+                                .font(.system(size: 14, weight: .semibold))
                         }
-                    )
-                    .tint(.white)
+                        .buttonStyle(GlassButtonStyle())
 
-                    HStack {
-                        Text(timeLabel(store.bridge.currentTime))
-                        Spacer()
-                        Text(timeLabel(store.bridge.duration))
-                    }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.6))
-                }
-                .padding(.horizontal, 24)
-
-                HStack(spacing: 28) {
-                    Button {
-                        Task { await store.setShuffleMode(store.bridge.shuffleMode == .off ? .songs : .off) }
-                    } label: {
-                        Image(systemName: "shuffle")
-                            .font(.system(size: 16, weight: .semibold))
-                    }
-                    .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? .pink : nil))
-                    .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
-
-                    Button { Task { try? await store.bridge.skipToPrevious() } } label: {
-                        Image(systemName: "backward.fill").font(.system(size: 22))
-                    }
-                    .buttonStyle(GlassButtonStyle())
-
-                    Button { Task { try? await store.bridge.togglePlayPause() } } label: {
-                        Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 30))
-                    }
-                    .buttonStyle(GlassButtonStyle(tint: .pink))
-
-                    Button { Task { try? await store.bridge.skipToNext() } } label: {
-                        Image(systemName: "forward.fill").font(.system(size: 22))
-                    }
-                    .buttonStyle(GlassButtonStyle())
-
-                    Button {
-                        Task { await store.cycleRepeatMode() }
-                    } label: {
-                        Image(systemName: repeatIconName)
-                            .font(.system(size: 16, weight: .semibold))
-                    }
-                    .buttonStyle(GlassButtonStyle(tint: store.bridge.repeatMode == .off ? nil : .pink))
-                    .foregroundStyle(store.bridge.repeatMode == .off ? .white.opacity(0.6) : .white)
-                }
-                .foregroundStyle(.white)
-
-                HStack(spacing: 10) {
-                    Image(systemName: "speaker.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
-                    Slider(
-                        value: Binding(
-                            get: { isAdjustingVolume ? volumeValue : store.bridge.volume },
-                            set: { volumeValue = $0 }
-                        ),
-                        in: 0...1,
-                        onEditingChanged: { editing in
-                            isAdjustingVolume = editing
-                            if !editing {
-                                Task { await store.setVolume(volumeValue) }
+                        AirPlayButton(tintColor: .white)
+                            .frame(width: 44, height: 44)
+                            .background {
+                                if #available(iOS 26.0, *) {
+                                    Circle().fill(.clear).glassEffect(.regular, in: Circle())
+                                } else {
+                                    Circle().fill(.ultraThinMaterial)
+                                }
                             }
-                        }
-                    )
-                    .tint(.white)
-                    Image(systemName: "speaker.wave.3.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-                .padding(.horizontal, 24)
-
-                HStack(spacing: 16) {
-                    Button {
-                        showQueue = true
-                    } label: {
-                        Label("Up Next", systemImage: "list.bullet")
-                            .font(.system(size: 14, weight: .semibold))
                     }
-                    .buttonStyle(GlassButtonStyle())
+                    .foregroundStyle(.white)
 
-                    AirPlayButton(tintColor: .white)
-                        .frame(width: 44, height: 44)
-                        .background {
-                            if #available(iOS 26.0, *) {
-                                Circle().fill(.clear).glassEffect(.regular, in: Circle())
-                            } else {
-                                Circle().fill(.ultraThinMaterial)
-                            }
-                        }
+                    Spacer(minLength: 0)
                 }
-                .foregroundStyle(.white)
-
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.bottom, 20)
             }
-            .padding(.bottom, 20)
         }
         .presentationDragIndicator(.hidden)
         .sheet(isPresented: $showQueue) {

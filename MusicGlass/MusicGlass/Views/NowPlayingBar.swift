@@ -11,20 +11,30 @@ struct NowPlayingBar: View {
             GlassSurface(cornerRadius: 22) {
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
-                        ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: 40, cornerRadius: 8)
+                        // Only this half opens the full player. The tap
+                        // gesture used to sit on the whole bar, competing
+                        // with the transport buttons for every touch; now
+                        // the buttons own their own taps outright and this
+                        // region is explicitly shaped so the empty space
+                        // beside the labels still counts as "expand".
+                        HStack(spacing: 12) {
+                            ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: 40, cornerRadius: 8)
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(info.title)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            Text(info.artistName)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(info.title)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                Text(info.artistName)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: 0)
                         }
-
-                        Spacer()
+                        .contentShape(Rectangle())
+                        .onTapGesture { showFullPlayer = true }
 
                         Button {
                             showQueue = true
@@ -69,7 +79,13 @@ struct NowPlayingBar: View {
                 }
             }
             .padding(.horizontal, 12)
-            .onTapGesture { showFullPlayer = true }
+            // The glass backdrop is drawn by a `.background`/`.glassEffect`,
+            // neither of which makes the bar hit-testable — so every touch
+            // that didn't land exactly on a label or glyph passed straight
+            // through to the list behind it. This makes the whole pill a
+            // real touch target, which also stops taps meant for the mini
+            // player from selecting rows underneath it.
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .sheet(isPresented: $showQueue) {
                 QueueView()
