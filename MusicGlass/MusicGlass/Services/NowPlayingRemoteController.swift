@@ -35,7 +35,35 @@ final class NowPlayingRemoteController {
         self.store = store
         configureRemoteCommands()
         observePlaybackState()
-        observePlaybackStateForLiveActivity()
+        // Disabled: this was assumed to fail silently without a Widget
+        // Extension target to render the Live Activity's actual content
+        // (see the big comment below), but `Activity.request` apparently
+        // succeeds anyway and reserves a real, visible Live Activity slot —
+        // which on-device showed up as an empty bar spanning the top of the
+        // screen, expanded but rendering nothing, since there's no extension
+        // providing any UI for it. Re-enable this once that extension
+        // actually exists (see the README's "Live Activity / Widget —
+        // manual Xcode step required" section); until then, starting one is
+        // strictly worse than not having the feature.
+        // observePlaybackStateForLiveActivity()
+        endAnyExistingLiveActivities()
+    }
+
+    /// Live Activities started by a previous launch (before this was
+    /// disabled above) can still be running — ActivityKit persists them
+    /// independent of the app's own process, so simply not starting new
+    /// ones doesn't clear an old one already stuck showing an empty bar.
+    /// Ends every activity for this app's attributes type on launch, once,
+    /// as cleanup; harmless (and near-instant) once none exist.
+    private func endAnyExistingLiveActivities() {
+        guard #available(iOS 16.2, *) else { return }
+        #if canImport(ActivityKit)
+        Task {
+            for activity in Activity<MusicGlassActivityAttributes>.activities {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+        #endif
     }
 
     // MARK: - Mirroring MusicKitBridge -> MPNowPlayingInfoCenter
