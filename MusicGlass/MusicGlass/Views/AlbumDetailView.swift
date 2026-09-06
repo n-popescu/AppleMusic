@@ -18,14 +18,21 @@ struct AlbumDetailView: View {
                         Button {
                             Task { await store.play(album: album) }
                         } label: {
-                            Label("Play Album", systemImage: "play.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
+                            Group {
+                                if store.pendingPlaybackID == album.id {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Label("Play Album", systemImage: "play.fill")
+                                }
+                            }
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
                         }
                         .buttonStyle(.plain)
                         .background { GlassSurface(cornerRadius: 18, tint: .pink) { Color.clear } }
                         .foregroundStyle(.white)
+                        .disabled(store.pendingPlaybackID != nil)
 
                         if let kind = album.playParams?.kind {
                             Menu {

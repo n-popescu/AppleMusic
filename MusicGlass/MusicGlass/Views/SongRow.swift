@@ -50,7 +50,9 @@ struct SongRow: View {
 
                 Spacer()
 
-                if isCurrentlyPlaying {
+                if store.pendingPlaybackID == song.id {
+                    ProgressView().tint(.pink)
+                } else if isCurrentlyPlaying {
                     Image(systemName: "waveform")
                         .foregroundStyle(.pink)
                 } else {

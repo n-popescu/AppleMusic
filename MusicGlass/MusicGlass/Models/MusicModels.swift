@@ -133,6 +133,19 @@ enum PlaybackStatus: Int, Codable {
     case completed = 9
 
     var isPlaying: Bool { self == .playing }
+
+    /// True while MusicKit JS is between states — buffering, seeking, or
+    /// otherwise not yet actually playing or paused. Buttons that only
+    /// checked `isPlaying` showed "play" the whole time a track was
+    /// buffering, which read as "nothing happened" when someone tapped it
+    /// and made repeat taps (and the "everything feels slow" reports) more
+    /// likely, since there was no visual sign anything was in progress.
+    var isBusy: Bool {
+        switch self {
+        case .loading, .seeking, .waiting, .stalled: return true
+        case .none, .playing, .paused, .stopped, .ended, .completed: return false
+        }
+    }
 }
 
 struct NowPlayingInfo: Codable, Equatable {

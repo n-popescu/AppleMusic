@@ -40,10 +40,11 @@ struct DiscoverView: View {
                                             Button {
                                                 Task { await store.play(song: song) }
                                             } label: {
-                                                TileCard(title: song.title, subtitle: song.artistName, artwork: song.artwork)
+                                                TileCard(title: song.title, subtitle: song.artistName, artwork: song.artwork, isLoading: store.pendingPlaybackID == song.id)
                                                     .frame(width: 140)
                                             }
                                             .buttonStyle(.plain)
+                                            .disabled(store.pendingPlaybackID != nil)
                                         }
                                     }
                                 }
@@ -56,10 +57,11 @@ struct DiscoverView: View {
                                             Button {
                                                 Task { await store.play(album: album) }
                                             } label: {
-                                                TileCard(title: album.title, subtitle: album.artistName, artwork: album.artwork)
+                                                TileCard(title: album.title, subtitle: album.artistName, artwork: album.artwork, isLoading: store.pendingPlaybackID == album.id)
                                                     .frame(width: 140)
                                             }
                                             .buttonStyle(.plain)
+                                            .disabled(store.pendingPlaybackID != nil)
                                         }
                                     }
                                 }
@@ -72,10 +74,11 @@ struct DiscoverView: View {
                                             Button {
                                                 Task { await store.play(station: station) }
                                             } label: {
-                                                TileCard(title: station.name, subtitle: station.isLive == true ? "Live" : nil, artwork: station.artwork)
+                                                TileCard(title: station.name, subtitle: station.isLive == true ? "Live" : nil, artwork: station.artwork, isLoading: store.pendingPlaybackID == station.id)
                                                     .frame(width: 140)
                                             }
                                             .buttonStyle(.plain)
+                                            .disabled(store.pendingPlaybackID != nil)
                                         }
                                     }
                                 }
@@ -123,18 +126,20 @@ struct DiscoverView: View {
             Button {
                 Task { await store.play(album: album) }
             } label: {
-                TileCard(title: album.title, subtitle: album.artistName, artwork: album.artwork)
+                TileCard(title: album.title, subtitle: album.artistName, artwork: album.artwork, isLoading: store.pendingPlaybackID == album.id)
                     .frame(width: 140)
             }
             .buttonStyle(.plain)
+            .disabled(store.pendingPlaybackID != nil)
         } else if let playlist = item.playlist {
             Button {
                 Task { await store.play(playlist: playlist) }
             } label: {
-                TileCard(title: playlist.name, subtitle: playlist.curatorName, artwork: playlist.artwork)
+                TileCard(title: playlist.name, subtitle: playlist.curatorName, artwork: playlist.artwork, isLoading: store.pendingPlaybackID == playlist.id)
                     .frame(width: 140)
             }
             .buttonStyle(.plain)
+            .disabled(store.pendingPlaybackID != nil)
         }
     }
 

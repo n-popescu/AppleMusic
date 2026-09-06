@@ -121,21 +121,28 @@ struct NowPlayingFullView: View {
                         .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? .pink : nil))
                         .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
 
-                        Button { Task { try? await store.bridge.skipToPrevious() } } label: {
+                        Button { Task { await store.skipToPrevious() } } label: {
                             Image(systemName: "backward.fill").font(.system(size: 22))
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .disabled(store.isTransportBusy)
 
-                        Button { Task { try? await store.bridge.togglePlayPause() } } label: {
-                            Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 30))
+                        Button { Task { await store.togglePlayPause() } } label: {
+                            if store.isTransportBusy || store.bridge.playbackStatus.isBusy {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 30))
+                            }
                         }
                         .buttonStyle(GlassButtonStyle(tint: .pink))
+                        .disabled(store.isTransportBusy)
 
-                        Button { Task { try? await store.bridge.skipToNext() } } label: {
+                        Button { Task { await store.skipToNext() } } label: {
                             Image(systemName: "forward.fill").font(.system(size: 22))
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .disabled(store.isTransportBusy)
 
                         Button {
                             Task { await store.cycleRepeatMode() }

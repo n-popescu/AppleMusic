@@ -44,18 +44,24 @@ struct NowPlayingBar: View {
                         .buttonStyle(GlassButtonStyle())
 
                         Button {
-                            Task { try? await store.bridge.togglePlayPause() }
+                            Task { await store.togglePlayPause() }
                         } label: {
-                            Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
+                            if store.isTransportBusy || store.bridge.playbackStatus.isBusy {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
+                            }
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .disabled(store.isTransportBusy)
 
                         Button {
-                            Task { try? await store.bridge.skipToNext() }
+                            Task { await store.skipToNext() }
                         } label: {
                             Image(systemName: "forward.fill")
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .disabled(store.isTransportBusy)
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 8)

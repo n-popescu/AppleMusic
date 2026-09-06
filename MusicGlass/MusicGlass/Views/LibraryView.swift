@@ -310,11 +310,23 @@ struct TileCard: View {
     let title: String
     let subtitle: String?
     let artwork: Artwork?
+    /// Overlays a spinner on the artwork — used while this tile's own play
+    /// request is in flight, so tapping it reads as "working" instead of
+    /// "did nothing" for however long buffering takes before playback
+    /// (and `nowPlaying`) actually updates.
+    var isLoading: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ArtworkImage(artwork: artwork, size: 150, cornerRadius: 14)
                 .frame(maxWidth: .infinity)
+                .overlay {
+                    if isLoading {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.black.opacity(0.45))
+                            .overlay { ProgressView().tint(.white) }
+                    }
+                }
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)

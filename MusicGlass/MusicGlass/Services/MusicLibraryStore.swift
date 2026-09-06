@@ -327,19 +327,68 @@ final class MusicLibraryStore: ObservableObject {
 
     // MARK: - Playback
 
+    /// True while a play/pause/skip call is actually in flight. The mini
+    /// player and full player used to call `store.bridge.togglePlayPause()`
+    /// etc. directly with a bare `try?`, so a tap gave zero visual feedback
+    /// until (if ever) `playbackStatus` itself changed — which for a tap
+    /// that fails outright never happens, and even for one that succeeds can
+    /// lag behind by however long buffering takes. This is read by both
+    /// `NowPlayingBar` and `NowPlayingFullView` to show a spinner and
+    /// disable the buttons for the duration of the call, and it fixes the
+    /// silent-failure side of the same bug: `try?` discarded any error, this
+    /// surfaces it through the normal `errorMessage` path via `perform`.
+    @Published var isTransportBusy = false
+
+    func togglePlayPause() async {
+        isTransportBusy = true
+        defer { isTransportBusy = false }
+        await perform { try await self.bridge.togglePlayPause() }
+    }
+
+    func skipToNext() async {
+        isTransportBusy = true
+        defer { isTransportBusy = false }
+        await perform { try await self.bridge.skipToNext() }
+    }
+
+    func skipToPrevious() async {
+        isTransportBusy = true
+        defer { isTransportBusy = false }
+        await perform { try await self.bridge.skipToPrevious() }
+    }
+
+    /// The id of whatever's currently being requested to play, so a tapped
+    /// row/tile can show its own spinner immediately. `nowPlaying`/
+    /// `playbackStatus` only update once MusicKit JS's own events fire,
+    /// which lags behind a tap by however long buffering takes — until
+    /// then, without this, a tap looked like it did nothing at all.
+    @Published var pendingPlaybackID: String?
+
+    private func performPlayback(id: String, _ operation: () async throws -> Void) async {
+        pendingPlaybackID = id
+        defer { pendingPlaybackID = nil }
+        await perform(operation)
+    }
+
     func play(song: Song) async {
         guard let params = song.playParams else { return }
-        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
+        await performPlayback(id: song.id) {
+            try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
+        }
     }
 
     func play(album: Album) async {
         guard let params = album.playParams else { return }
-        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
+        await performPlayback(id: album.id) {
+            try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
+        }
     }
 
     func play(playlist: Playlist) async {
         guard let params = playlist.playParams else { return }
-        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
+        await performPlayback(id: playlist.id) {
+            try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
+        }
     }
 
     /// Sets shuffle on *before* loading the new queue, so the playlist starts
@@ -347,7 +396,7 @@ final class MusicLibraryStore: ObservableObject {
     /// already playing in its original order.
     func shufflePlay(playlist: Playlist) async {
         guard let params = playlist.playParams else { return }
-        await perform {
+        await performPlayback(id: playlist.id) {
             try await self.bridge.setShuffleMode(.songs)
             try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
         }
@@ -355,7 +404,9 @@ final class MusicLibraryStore: ObservableObject {
 
     func play(station: Station) async {
         guard let params = station.playParams else { return }
-        await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false) }
+        await performPlayback(id: station.id) {
+            try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false)
+        }
     }
 
     // MARK: - Shuffle / Repeat / Volume
