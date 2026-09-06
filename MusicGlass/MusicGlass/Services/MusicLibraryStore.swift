@@ -252,7 +252,20 @@ final class MusicLibraryStore: ObservableObject {
     /// `force: true` (pull-to-refresh, the Retry button) always hits the
     /// network no matter how fresh the cache is.
     func refreshLibrary(force: Bool = false) async {
-        guard bridge.isReady, bridge.isAuthorized else { return }
+        // `bridge.isReady`/`.isAuthorized` both start false and only become
+        // meaningful once the hidden WKWebView finishes loading musickit.js,
+        // calls configure(), and restores the session from cookies — a few
+        // real seconds after a cold launch. Library is the default tab, so
+        // its `.task` used to fire and check these *before* that finished,
+        // see `false` for isAuthorized (even for someone genuinely signed
+        // in), and bail out via the old `guard ... else { return }` — and
+        // since `.task` only runs once per view lifetime, the background
+        // sync this is meant to do then just never happened for the rest of
+        // the session. Waiting for ready first, then checking isAuthorized,
+        // means that check reflects the real current state instead of a
+        // startup race.
+        await bridge.waitUntilReady()
+        guard bridge.isAuthorized else { return }
         if !force, let cachedAt = libraryCachedAt, Date().timeIntervalSince(cachedAt) < Self.libraryCacheMaxAge {
             hasLoadedLibraryOnce = true
             return
@@ -573,25 +586,28 @@ final class MusicLibraryStore: ObservableObject {
     // MARK: - Discovery
 
     func refreshDiscover() async {
-        // Matches the empty state's own copy ("Sign in to see recommendations")
-        // and `refreshLibrary()`'s existing isAuthorized guard: don't call into
-        // the bridge at all when signed out, full stop. This was reportedly
-        // crashing when Discover was opened right after a cold launch, before
-        // the person had signed in — whatever the exact mechanism, not calling
-        // MusicKit at all pre-auth removes that class of bug entirely.
+        // `isAuthorized` starts false and only becomes meaningful once the
+        // bridge is actually ready (see refreshLibrary()'s comment for the
+        // same race in more detail) — checking it *before* waiting for ready
+        // meant this could see `false` for a genuinely signed-in person in
+        // the brief window right after a cold launch, wipe Discover's state,
+        // and return, with nothing left to ever retry since `.task` only
+        // runs once per view lifetime. Waiting for ready first makes the
+        // check below reflect the real current state.
+        await bridge.waitUntilReady()
+
+        // Matches the empty state's own copy ("Sign in to see recommendations"):
+        // don't call into the bridge at all when signed out, full stop. This
+        // was reportedly crashing when Discover was opened right after a cold
+        // launch, before the person had signed in — whatever the exact
+        // mechanism, not calling MusicKit at all pre-auth removes that class
+        // of bug entirely.
         guard bridge.isAuthorized else {
             recommendations = []
             charts = .init()
             stations = []
             return
         }
-
-        // Also wait for the engine itself, in case this fires in the brief
-        // window right after `isAuthorized` flips true but before a fresh
-        // `MusicKit.configure()` (e.g. right after the sign-in reload) has
-        // finished — calling in before `isReady` is a premature-call bug
-        // independent of the auth guard above.
-        await bridge.waitUntilReady()
 
         isLoadingDiscover = true
         defer { isLoadingDiscover = false }

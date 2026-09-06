@@ -22,33 +22,20 @@ struct LibraryView: View {
                 VStack(spacing: 0) {
                     sectionPicker
 
-                    if store.isLoadingLibrary && !store.hasLoadedLibraryOnce {
-                        Spacer()
-                        ProgressView("Loading your library…")
-                            .tint(.white)
-                            .foregroundStyle(.white.opacity(0.7))
-                        Spacer()
-                    } else if let error = store.errorMessage, isCurrentSectionEmpty {
-                        Spacer()
-                        errorState(message: error)
-                        Spacer()
-                    } else if !store.bridge.isAuthorized {
-                        Spacer()
-                        emptyState(
-                            systemImage: "person.crop.circle.badge.exclamationmark",
-                            title: "Not signed in",
-                            message: "Sign in to Apple Music from the Account tab to see your library."
-                        )
-                        Spacer()
-                    } else if isCurrentSectionEmpty {
-                        Spacer()
-                        emptyState(
-                            systemImage: "music.note.list",
-                            title: "Nothing here yet",
-                            message: "Your \(selectedSection.rawValue.lowercased()) will show up here."
-                        )
-                        Spacer()
-                    } else {
+                    if !isCurrentSectionEmpty {
+                        // Real content — whether from the disk cache at
+                        // launch or a completed fetch — always wins over
+                        // every state below. `bridge.isAuthorized` starts
+                        // `false` and only flips true once the hidden
+                        // WKWebView finishes loading musickit.js, calling
+                        // configure(), and restoring the session from
+                        // cookies — a few real seconds on a cold launch.
+                        // With this check *after* the auth one (as it used
+                        // to be), the tab showed "Not signed in" the whole
+                        // time despite already having cached playlists to
+                        // show, only correcting itself once something else
+                        // (switching tabs and back) forced a re-render after
+                        // isAuthorized had caught up.
                         ScrollView {
                             LazyVStack(spacing: 10) {
                                 switch selectedSection {
@@ -62,6 +49,40 @@ struct LibraryView: View {
                             .padding(.top, 12)
                             .padding(.bottom, 120) // room for the mini player
                         }
+                    } else if store.isLoadingLibrary && !store.hasLoadedLibraryOnce {
+                        Spacer()
+                        ProgressView("Loading your library…")
+                            .tint(.white)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Spacer()
+                    } else if let error = store.errorMessage {
+                        Spacer()
+                        errorState(message: error)
+                        Spacer()
+                    } else if !store.bridge.isReady {
+                        // Not yet confirmed either way — avoid flashing
+                        // "Not signed in" before the bridge has even had a
+                        // chance to restore an existing session.
+                        Spacer()
+                        ProgressView()
+                            .tint(.white)
+                        Spacer()
+                    } else if !store.bridge.isAuthorized {
+                        Spacer()
+                        emptyState(
+                            systemImage: "person.crop.circle.badge.exclamationmark",
+                            title: "Not signed in",
+                            message: "Sign in to Apple Music from the Account tab to see your library."
+                        )
+                        Spacer()
+                    } else {
+                        Spacer()
+                        emptyState(
+                            systemImage: "music.note.list",
+                            title: "Nothing here yet",
+                            message: "Your \(selectedSection.rawValue.lowercased()) will show up here."
+                        )
+                        Spacer()
                     }
                 }
             }
