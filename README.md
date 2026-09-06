@@ -208,13 +208,14 @@ release.
 
 ---
 
-## CI: unsigned IPA build
+## CI: unsigned IPA build + auto-release
 
-`.github/workflows/ios-build.yml` runs on `macos-latest` (push to `main` and
-this branch, PRs into `main`, and manual `workflow_dispatch`), builds
-`MusicGlass.xcodeproj` with `xcodebuild … -sdk iphoneos CODE_SIGNING_ALLOWED=NO
-clean archive`, then hand-packages the resulting `.xcarchive`'s `.app` into a
-`Payload/MusicGlass.app` → `.ipa` zip, and uploads it as a build artifact.
+`.github/workflows/ios-build.yml` runs on `macos-latest` (push to `main`, PRs
+into `main`, and manual `workflow_dispatch`), builds `MusicGlass.xcodeproj`
+with `xcodebuild … -sdk iphoneos CODE_SIGNING_ALLOWED=NO clean archive`, then
+hand-packages the resulting `.xcarchive`'s `.app` into a
+`Payload/MusicGlass.app` → `Lucent-1.0.0-unsigned.ipa` zip, and uploads it as
+a build artifact.
 
 **This produces an unsigned `.ipa`** — there is no signing certificate or
 provisioning profile involved anywhere in this workflow, and none should be
@@ -223,6 +224,15 @@ resign it locally with your own certificate + provisioning profile (or run it
 through a sideloading tool that does that for you). A real
 App Store/TestFlight distribution pipeline is a different, signed workflow
 with its own certificate/profile secrets — intentionally out of scope here.
+
+**Auto-release:** on every push to `main` (not on PRs or non-`main`
+`workflow_dispatch` runs), a second job downloads that build's `.ipa` and
+publishes/updates a GitHub Release tagged `v1.0.0` with the ipa attached as a
+release asset, via `softprops/action-gh-release`. The app version currently
+lives in the Xcode project's `MARKETING_VERSION` build setting (`1.0.0`,
+`CURRENT_PROJECT_VERSION` build number `1`) — bump both there and change the
+workflow's `tag_name`/`IPA_NAME`/release `name` to cut a new versioned release
+instead of overwriting `v1.0.0`.
 
 ---
 

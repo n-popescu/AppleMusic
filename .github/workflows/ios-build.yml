@@ -13,11 +13,13 @@ on:
   push:
     branches:
       - main
-      - claude/workflow-ci-ios-build-qypy3j
   pull_request:
     branches:
       - main
   workflow_dispatch: {}
+
+permissions:
+  contents: write   # needed so the release job can create/update the GitHub Release
 
 jobs:
   build-unsigned-ipa:
@@ -29,6 +31,7 @@ jobs:
       SCHEME: MusicGlass
       ARCHIVE_PATH: ${{ github.workspace }}/build/MusicGlass.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
+      IPA_NAME: Lucent-1.0.0-unsigned.ipa
 
     steps:
       - name: Checkout
@@ -76,15 +79,45 @@ jobs:
           # CI, so this produces an UNSIGNED ipa — it needs to be resigned
           # locally (e.g. via `codesign` + a real provisioning profile, or a
           # sideloading tool) before it can be installed on a device.
-          (cd "$EXPORT_PATH" && zip -qry "MusicGlass-unsigned.ipa" "Payload")
+          (cd "$EXPORT_PATH" && zip -qry "$IPA_NAME" "Payload")
 
           mkdir -p "$GITHUB_WORKSPACE/build/output"
-          mv "$EXPORT_PATH/MusicGlass-unsigned.ipa" "$GITHUB_WORKSPACE/build/output/MusicGlass-unsigned.ipa"
+          mv "$EXPORT_PATH/$IPA_NAME" "$GITHUB_WORKSPACE/build/output/$IPA_NAME"
 
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MusicGlass-unsigned-ipa
-          path: build/output/MusicGlass-unsigned.ipa
+          name: Lucent-unsigned-ipa
+          path: build/output/${{ env.IPA_NAME }}
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build-unsigned-ipa
+    runs-on: ubuntu-latest
+    # Only cut/update a release from pushes to main (not PRs, not manual
+    # workflow_dispatch runs from other branches) — this reuses the same
+    # v1.0.0 tag/release on every push to main until the version is bumped.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download unsigned IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Lucent-unsigned-ipa
+          path: build/output
+
+      - name: Create/update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: Lucent 1.0.0
+          body: |
+            Automated build of Lucent 1.0.0 — **unsigned** `.ipa`, produced with
+            `CODE_SIGNING_ALLOWED=NO` (see `.github/workflows/ios-build.yml`).
+            There is no signing certificate or provisioning profile involved in
+            this build. Resign it locally (`codesign` + your own provisioning
+            profile) or run it through a sideloading tool before installing on
+            a device.
+          files: build/output/Lucent-1.0.0-unsigned.ipa
