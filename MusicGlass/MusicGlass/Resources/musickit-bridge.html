@@ -332,26 +332,31 @@
   // `playNext`/`playLater` aren't available: rebuilds the queue array with
   // the new item spliced in either right after the current track ('next') or
   // at the end ('later'), same rebuild-and-resume approach as
-  // `moveQueueItem`. Only needs {id, kind} for every item, which is all
-  // `setQueue({ items })` requires.
-  async function insertIntoQueueFallback(id, kind, position) {
+  // `moveQueueItem`.
+  // `SetQueueOptions.items` takes an array of `descriptor` — verified
+  // (wsmd/musickit-typescript, same source used for setQueueAndPlay's fix
+  // above) to mean "a MusicKit.MediaItem instance, or a plain string id",
+  // never an `{id, kind}`-shaped object. That's what this used to build,
+  // which is the same class of bug as setQueueAndPlay's fabricated
+  // `library*` keys — a shape `setQueue` has never recognized, so this
+  // fallback path (only reached when MusicKit JS's own playNext/playLater
+  // are missing or throw) likely never actually worked either.
+  async function insertIntoQueueFallback(id, position) {
     const m = requireMusic();
     const q = m.queue;
-    const items = (q && q.items)
-      ? q.items.map(i => ({ id: i.id, kind: (i.playParams && i.playParams.kind) || 'song' }))
-      : [];
+    const items = (q && q.items) ? q.items.map(i => i.id) : [];
     const wasPlayingIndex = (q && typeof q.position === 'number') ? q.position : -1;
-    const currentlyPlayingItem = (q && q.items && wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
-      ? q.items[wasPlayingIndex]
+    const currentlyPlayingId = (q && q.items && wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
+      ? q.items[wasPlayingIndex].id
       : null;
 
     const insertAt = position === 'next' ? Math.min(wasPlayingIndex + 1, items.length) : items.length;
-    items.splice(Math.max(insertAt, 0), 0, { id: id, kind: kind });
+    items.splice(Math.max(insertAt, 0), 0, id);
 
     await m.setQueue({ items: items });
 
-    if (currentlyPlayingItem) {
-      const newIndex = items.findIndex(i => i.id === currentlyPlayingItem.id);
+    if (currentlyPlayingId) {
+      const newIndex = items.indexOf(currentlyPlayingId);
       if (newIndex >= 0) {
         await m.changeToMediaAtIndex(newIndex);
       }
@@ -437,11 +442,14 @@
     // verified against a live MusicKit JS release, a client-side fallback
     // (same rebuild-the-array approach as `moveQueueItem`) covers releases
     // where they're missing or throw.
+    // Same descriptor shape as setQueueAndPlay above — no `library`-prefixed
+    // keys exist in MusicKit JS's SetQueueOptions, so playNext/playLater
+    // take the same plain `song`/`album`/`playlist` key regardless of
+    // isLibrary (see setQueueAndPlay's comment for how this was verified).
     playNext: async function (id, kind, isLibrary) {
       const m = requireMusic();
-      const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
       const descriptor = {};
-      descriptor[key] = [id];
+      descriptor[kind] = id;
       if (typeof m.playNext === 'function') {
         try {
           await m.playNext(descriptor);
@@ -450,14 +458,13 @@
           // Fall through to the client-side fallback below.
         }
       }
-      await insertIntoQueueFallback(id, kind, 'next');
+      await insertIntoQueueFallback(id, 'next');
     },
 
     playLater: async function (id, kind, isLibrary) {
       const m = requireMusic();
-      const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
       const descriptor = {};
-      descriptor[key] = [id];
+      descriptor[kind] = id;
       if (typeof m.playLater === 'function') {
         try {
           await m.playLater(descriptor);
@@ -466,16 +473,21 @@
           // Fall through to the client-side fallback below.
         }
       }
-      await insertIntoQueueFallback(id, kind, 'later');
+      await insertIntoQueueFallback(id, 'later');
     },
 
     // ---- Ratings (love/dislike) ----
     // Apple Music REST: PUT .../v1/me/ratings/{type}/{id} with
     // { attributes: { value: 1 } } for love, -1 for dislike; DELETE removes it.
+    // Apple's documented request body for this endpoint is
+    // {"type":"rating","attributes":{"value":...}} — the top-level "type"
+    // is required (this is a JSON:API-shaped body), and was missing here
+    // entirely, which very plausibly made every Love/Dislike tap 400 rather
+    // than actually set a rating.
     setRating: async function (id, kind, value) {
       const m = requireMusic();
       await m.api.music(`/v1/me/ratings/${kind}s/${id}`, {}, {
-        fetchOptions: { method: 'PUT', body: JSON.stringify({ attributes: { value: value } }) }
+        fetchOptions: { method: 'PUT', body: JSON.stringify({ type: 'rating', attributes: { value: value } }) }
       });
     },
 
@@ -531,19 +543,27 @@
       const m = requireMusic();
       const res = await m.api.music('/v1/me/recent/played', { limit: 30 });
       const data = res.data.data || [];
-      return data.map(d => {
-        const isLibraryType = typeof d.type === 'string' && d.type.startsWith('library-');
-        if (d.type === 'songs' || d.type === 'library-songs') {
-          return { kind: 'song', song: mapSongAttributes(d.id, d.attributes, isLibraryType), album: null, playlist: null };
+      // Same per-item isolation as mapSafely elsewhere in this file — a raw
+      // .map() here meant one malformed item (e.g. missing an attribute one
+      // of the map*Attributes functions reads directly) rejected this
+      // entire list instead of just that one entry.
+      const items = [];
+      data.forEach(d => {
+        try {
+          const isLibraryType = typeof d.type === 'string' && d.type.startsWith('library-');
+          if (d.type === 'songs' || d.type === 'library-songs') {
+            items.push({ kind: 'song', song: mapSongAttributes(d.id, d.attributes, isLibraryType), album: null, playlist: null });
+          } else if (d.type === 'albums' || d.type === 'library-albums') {
+            items.push({ kind: 'album', song: null, album: mapAlbumAttributes(d.id, d.attributes, isLibraryType), playlist: null });
+          } else if (d.type === 'playlists' || d.type === 'library-playlists') {
+            items.push({ kind: 'playlist', song: null, album: null, playlist: mapPlaylistAttributes(d.id, d.attributes, isLibraryType) });
+          }
+          // else: e.g. stations — not modeled in the "recently played" UI.
+        } catch (e) {
+          post({ type: 'error', message: 'Skipped a malformed recently-played item: ' + e.message });
         }
-        if (d.type === 'albums' || d.type === 'library-albums') {
-          return { kind: 'album', song: null, album: mapAlbumAttributes(d.id, d.attributes, isLibraryType), playlist: null };
-        }
-        if (d.type === 'playlists' || d.type === 'library-playlists') {
-          return { kind: 'playlist', song: null, album: null, playlist: mapPlaylistAttributes(d.id, d.attributes, isLibraryType) };
-        }
-        return null; // e.g. stations — not modeled in the "recently played" UI.
-      }).filter(x => x !== null);
+      });
+      return items;
     },
 
     // ---- Discovery ----
@@ -691,8 +711,7 @@
     // Best-effort reorder: MusicKit JS doesn't publish a first-class "move
     // item in queue" API, so this rebuilds the queue from the current array
     // with the item moved, then resumes at the same track. This can cause a
-    // brief playback hiccup and should be treated as best-effort until
-    // verified against a real MusicKit JS release.
+    // brief playback hiccup.
     moveQueueItem: async function (from, to) {
       const m = requireMusic();
       const q = m.queue;
@@ -702,16 +721,18 @@
       items.splice(Math.max(0, Math.min(to, items.length)), 0, moved);
 
       const wasPlayingIndex = q.position;
-      const currentlyPlayingItem = (wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
-        ? q.items[wasPlayingIndex]
+      const currentlyPlayingId = (wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
+        ? q.items[wasPlayingIndex].id
         : null;
 
-      const descriptor = { items: items.map(i => ({ id: i.id, kind: (i.playParams && i.playParams.kind) || 'song' })) };
-      await m.setQueue(descriptor);
+      // Same descriptor-shape fix as insertIntoQueueFallback above: `items`
+      // takes plain id strings (or MediaItem instances), never `{id, kind}`
+      // objects.
+      await m.setQueue({ items: items.map(i => i.id) });
 
       // Resume from wherever the previously-playing item ended up.
-      if (currentlyPlayingItem) {
-        const newIndex = items.findIndex(i => i.id === currentlyPlayingItem.id);
+      if (currentlyPlayingId) {
+        const newIndex = items.findIndex(i => i.id === currentlyPlayingId);
         if (newIndex >= 0) {
           await m.changeToMediaAtIndex(newIndex);
         }
