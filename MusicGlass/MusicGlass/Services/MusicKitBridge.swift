@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import Combine
+import Security
 
 /// Errors surfaced from the JS side of the bridge.
 enum MusicKitBridgeError: LocalizedError {
@@ -130,6 +131,26 @@ final class MusicKitBridge: NSObject, ObservableObject {
         )
         controller.addUserScript(tokenScript)
 
+        // Sign-in state otherwise lives only in the WKWebView's cookie store,
+        // which is deleted along with everything else in the app's container
+        // on uninstall — the person has to sign in again after every
+        // reinstall even though nothing about their actual Apple Music
+        // account changed. The Keychain, by contrast, survives an uninstall
+        // on the same device by default. So the music-user-token MusicKit JS
+        // hands back once signed in is *also* mirrored into the Keychain
+        // (see the `userTokenDidChange` case below), and on every fresh
+        // launch that stored token — if any — is handed back to the page
+        // here so it can try to resume the session without a real cookie
+        // store to restore from. See `restoreUserToken` in the JS bridge for
+        // the validity check this goes through before being trusted.
+        let storedToken = Self.loadStoredUserToken() ?? ""
+        let storedTokenScript = WKUserScript(
+            source: "window.MUSICGLASS_STORED_USER_TOKEN = \(Self.jsStringLiteral(storedToken));",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        controller.addUserScript(storedTokenScript)
+
         webView.navigationDelegate = self
         webView.uiDelegate = self
         loadBridgePage()
@@ -186,6 +207,10 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     func unauthorize() async throws {
         try await callVoid("await MusicGlassBridge.unauthorize();")
+        // A deliberate sign-out should stay signed out — including on the
+        // next cold launch — so the Keychain-persisted token from
+        // `userTokenDidChange` must not outlive it.
+        Self.deleteStoredUserToken()
     }
 
     /// Ends the sign-in flow (cancelled or actually completed — there's no
@@ -378,6 +403,56 @@ final class MusicKitBridge: NSObject, ObservableObject {
         return json
     }
 
+    // MARK: - Keychain-persisted music-user-token (survives app uninstall)
+
+    private static let keychainService = "com.lucent.app.musicUserToken"
+    private static let keychainAccount = "musicUserToken"
+
+    private static func loadStoredUserToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let token = String(data: data, encoding: .utf8) else { return nil }
+        return token
+    }
+
+    private static func saveUserToken(_ token: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount
+        ]
+        // `kSecAttrAccessibleAfterFirstUnlock` (rather than the
+        // `...ThisDeviceOnly` variants) is still device-local — it just
+        // doesn't require the device to be unlocked right now, since this
+        // can run while playback continues in the background.
+        let attributes: [String: Any] = [
+            kSecValueData as String: Data(token.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
+            SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        } else {
+            SecItemAdd((query.merging(attributes) { _, new in new }) as CFDictionary, nil)
+        }
+    }
+
+    private static func deleteStoredUserToken() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
     /// Encodes `[String]` as a JS array literal, e.g. for a list of track IDs.
     private static func jsStringArrayLiteral(_ values: [String]) -> String {
         guard let data = try? JSONEncoder().encode(values),
@@ -512,6 +587,17 @@ extension MusicKitBridge: WKScriptMessageHandler {
 
         case "authorizationStatusDidChange":
             isAuthorized = (body["isAuthorized"] as? Bool) ?? false
+
+        case "userTokenDidChange":
+            // Mirrors the music-user-token into the Keychain so a future
+            // cold launch — even after an uninstall/reinstall, which wipes
+            // the WKWebView cookie store this session otherwise depends on —
+            // can hand it back to the page and try to resume without
+            // forcing a fresh sign-in. See `restoreUserToken` in the JS
+            // bridge for the validity check the restored token goes through.
+            if let token = body["token"] as? String, !token.isEmpty {
+                Self.saveUserToken(token)
+            }
 
         case "nowPlayingItemDidChange":
             // Same NSInvalidArgumentException hazard as `call<T>` below (see

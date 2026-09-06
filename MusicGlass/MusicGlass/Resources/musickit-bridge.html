@@ -51,10 +51,40 @@
 
   let music = null;
 
+  // Posts the current auth state, and — whenever authorized — also mirrors
+  // the music-user-token itself so the native side can save it to the
+  // Keychain (see MusicKitBridge.swift's `userTokenDidChange` case). The
+  // Keychain survives an app uninstall/reinstall the way this page's own
+  // cookie store doesn't, which is what lets a future cold launch skip
+  // sign-in via `restoreUserToken` below instead of requiring it again.
+  function postAuthState() {
+    if (!music) return;
+    post({ type: 'authorizationStatusDidChange', isAuthorized: music.isAuthorized });
+    if (music.isAuthorized && music.musicUserToken) {
+      post({ type: 'userTokenDidChange', token: music.musicUserToken });
+    }
+  }
+
+  // Called once at startup, only when MusicKit's own cookie-based restore
+  // left us signed out and native handed back a token it previously saved
+  // to the Keychain (e.g. this is a fresh install on a device that was
+  // signed in before). Setting `musicUserToken` directly isn't itself proof
+  // the token is still valid — it could have been revoked on Apple's side
+  // in the meantime — so this makes one cheap authenticated call before
+  // trusting it, and drops it again on failure rather than leaving the app
+  // thinking it's signed in when every real request would 401.
+  async function restoreUserToken(token) {
+    try {
+      music.musicUserToken = token;
+      await music.api.music('/v1/me/library/songs', { limit: 1 });
+    } catch (e) {
+      music.musicUserToken = null;
+    }
+    postAuthState();
+  }
+
   function attachInstanceListeners(instance) {
-    instance.addEventListener('authorizationStatusDidChange', () => {
-      post({ type: 'authorizationStatusDidChange', isAuthorized: instance.isAuthorized });
-    });
+    instance.addEventListener('authorizationStatusDidChange', postAuthState);
 
     instance.addEventListener('nowPlayingItemDidChange', () => {
       const item = instance.nowPlayingItem;
@@ -130,7 +160,11 @@
       music = MusicKit.getInstance();
       attachInstanceListeners(music);
       post({ type: 'ready' });
-      post({ type: 'authorizationStatusDidChange', isAuthorized: music.isAuthorized });
+      if (!music.isAuthorized && window.MUSICGLASS_STORED_USER_TOKEN) {
+        await restoreUserToken(window.MUSICGLASS_STORED_USER_TOKEN);
+      } else {
+        postAuthState();
+      }
       postPlaybackModes();
     } catch (err) {
       post({ type: 'error', message: 'MusicKit configure failed: ' + err.message });
