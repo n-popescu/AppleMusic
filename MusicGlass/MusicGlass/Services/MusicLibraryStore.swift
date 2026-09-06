@@ -269,6 +269,17 @@ final class MusicLibraryStore: ObservableObject {
         await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true) }
     }
 
+    /// Sets shuffle on *before* loading the new queue, so the playlist starts
+    /// shuffled from the first track rather than shuffling only once it's
+    /// already playing in its original order.
+    func shufflePlay(playlist: Playlist) async {
+        guard let params = playlist.playParams else { return }
+        await perform {
+            try await self.bridge.setShuffleMode(.songs)
+            try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: params.isLibrary ?? true)
+        }
+    }
+
     func play(station: Station) async {
         guard let params = station.playParams else { return }
         await perform { try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false) }

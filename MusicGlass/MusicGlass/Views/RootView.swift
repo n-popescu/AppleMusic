@@ -30,11 +30,22 @@ struct RootView: View {
         }
         .environmentObject(store)
         // The hidden MusicKit JS engine. It must stay mounted somewhere in the
-        // hierarchy to keep running, but is visually collapsed to nothing.
+        // hierarchy to keep running. This used to be collapsed to a literal
+        // 0x0 frame at opacity 0 — WebKit (like a backgrounded Safari tab)
+        // throttles JS execution in a webview it judges isn't actually
+        // visible, and a zero-size/zero-opacity view is exactly that signal.
+        // That throttling was invisible for most of this project's life only
+        // because of the call<T>/callVoid bug (see MusicKitBridge.swift)
+        // that made every bridge call return before its JS actually finished
+        // anyway — now that calls genuinely await real completion, the
+        // throttling shows up as calls taking seconds or silently never
+        // resolving. A real (if imperceptible) 1x1 point footprint at a
+        // near-zero-but-nonzero opacity is the standard workaround: enough
+        // for WebKit to keep treating it as an active, unthrottled page.
         .background(
             WebViewHost(webView: store.bridge.webView)
-                .frame(width: 0, height: 0)
-                .opacity(0)
+                .frame(width: 1, height: 1)
+                .opacity(0.011)
                 .allowsHitTesting(false)
         )
         .sheet(isPresented: $showFullPlayer) {

@@ -18,6 +18,24 @@
   // and receives events back via webkit.messageHandlers.musicKitEvent.
   // ---------------------------------------------------------------------
 
+  // WKWebView gives the underlying <audio>/<video> element MusicKit JS
+  // manages its own, independent integration with the system's Lock Screen
+  // / Control Center media controls via the standard Web Media Session API
+  // (`navigator.mediaSession`) — this is the same mechanism that lets a
+  // <video> playing in Safari show up there. That competes with this app's
+  // *own* native MPRemoteCommandCenter/MPNowPlayingInfoCenter setup
+  // (NowPlayingRemoteController.swift), and the web side's default
+  // seek-forward/seek-backward handlers are what was showing up as generic
+  // "skip 10 seconds" buttons instead of this app's real previous/next
+  // track controls. Neutering `setActionHandler` here — before anything
+  // else runs, well before MusicKit JS itself loads or plays anything —
+  // stops the web side from ever registering competing handlers in the
+  // first place, leaving the native controller as the only thing driving
+  // the system UI.
+  if (window.navigator && navigator.mediaSession) {
+    navigator.mediaSession.setActionHandler = function () {};
+  }
+
   const post = (payload) => {
     try {
       window.webkit.messageHandlers.musicKitEvent.postMessage(payload);
@@ -341,8 +359,14 @@
         // always play from the catalog, never the library.
         descriptor.station = id;
       } else {
+        // MusicKit JS's SetQueueOptions takes a single *string* id under
+        // `song`/`album`/`playlist` (and their `library*` counterparts) —
+        // only the plural `songs` key takes an array. Wrapping a singular
+        // key's value in an array here made `setQueue` throw, which is why
+        // playing a playlist (or an album/song taking this same path)
+        // surfaced as a bare "A JavaScript exception occurred".
         const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
-        descriptor[key] = [id];
+        descriptor[key] = id;
       }
       await m.setQueue(descriptor);
       await m.play();

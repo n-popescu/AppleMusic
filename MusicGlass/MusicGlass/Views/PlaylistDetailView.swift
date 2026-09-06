@@ -27,6 +27,16 @@ struct PlaylistDetailView: View {
                         .background { GlassSurface(cornerRadius: 18, tint: .pink) { Color.clear } }
                         .foregroundStyle(.white)
 
+                        Button {
+                            Task { await store.shufflePlay(playlist: playlist) }
+                        } label: {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .background { GlassSurface(cornerRadius: 18) { Color.clear } }
+                        .foregroundStyle(.white)
+
                         if let kind = playlist.playParams?.kind, playlist.playParams?.isLibrary != true {
                             Button {
                                 Task { await store.addToLibrary(id: playlist.id, kind: kind) }
