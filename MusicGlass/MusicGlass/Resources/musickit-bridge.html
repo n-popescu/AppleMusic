@@ -188,6 +188,21 @@
     return music;
   }
 
+  // Apple's own `playParams.isLibrary` (when present) is authoritative for
+  // *that specific item* and can legitimately disagree with the `isLibrary`
+  // this was fetched under — e.g. a library playlist can contain tracks
+  // added straight from the catalog, which come back with
+  // `playParams.isLibrary: false` even though the playlist itself is a
+  // library one. Forcing every item to the parent's isLibrary (the previous
+  // behavior) could build a `{ librarySong: <catalog id> }` queue
+  // descriptor for such a track, which is exactly the shape of thing that
+  // throws inside MusicKit JS's setQueue — surfacing natively as a bare "A
+  // JavaScript exception occurred" with tapping a song, or a playlist's
+  // Play/shuffle buttons, appearing to do nothing.
+  function resolveIsLibrary(a, fallback) {
+    return a.playParams && typeof a.playParams.isLibrary === 'boolean' ? a.playParams.isLibrary : !!fallback;
+  }
+
   function mapSongAttributes(id, a, isLibrary) {
     return {
       id: id,
@@ -198,7 +213,7 @@
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
       releaseDate: a.releaseDate || null,
       playParams: a.playParams
-        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
+        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: resolveIsLibrary(a, isLibrary) }
         : { id: id, kind: 'song', isLibrary: !!isLibrary }
     };
   }
@@ -212,7 +227,7 @@
       trackCount: a.trackCount || null,
       releaseDate: a.releaseDate || null,
       playParams: a.playParams
-        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
+        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: resolveIsLibrary(a, isLibrary) }
         : { id: id, kind: 'album', isLibrary: !!isLibrary }
     };
   }
@@ -271,7 +286,7 @@
       trackCount: a.trackCount || null,
       description: a.description ? (a.description.standard || a.description.short || null) : null,
       playParams: a.playParams
-        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
+        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: resolveIsLibrary(a, isLibrary) }
         : { id: id, kind: 'playlist', isLibrary: !!isLibrary }
     };
   }
@@ -366,23 +381,31 @@
     skipToPrevious: async function () { await requireMusic().skipToPreviousItem(); },
     seek: async function (seconds) { requireMusic().seekToTime(seconds); },
 
+    // `isLibrary` isn't used here at all — see the comment below for why.
+    // It's still accepted (and ignored) so every call site doesn't need to
+    // change.
     setQueueAndPlay: async function (id, kind, isLibrary) {
       const m = requireMusic();
       const descriptor = {};
       if (kind === 'station') {
         // MusicKit JS's SetQueueOptions takes a single station id under
-        // `station` (not an array like the other descriptor keys) — stations
-        // always play from the catalog, never the library.
+        // `station` — stations always play from the catalog, never the
+        // library.
         descriptor.station = id;
       } else {
-        // MusicKit JS's SetQueueOptions takes a single *string* id under
-        // `song`/`album`/`playlist` (and their `library*` counterparts) —
-        // only the plural `songs` key takes an array. Wrapping a singular
-        // key's value in an array here made `setQueue` throw, which is why
-        // playing a playlist (or an album/song taking this same path)
-        // surfaced as a bare "A JavaScript exception occurred".
-        const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
-        descriptor[key] = id;
+        // MusicKit JS's real SetQueueOptions type (verified against
+        // wsmd/musickit-typescript's MusicKit.SetQueueOptions.d.ts, since
+        // Apple's own online docs 404 for this exact type) has exactly one
+        // key per kind — `song`, `album`, `playlist` — with NO
+        // `library`-prefixed variants at all. MusicKit JS resolves library
+        // vs. catalog internally from the id itself; the caller always uses
+        // the same plain key either way. This code used to fabricate a
+        // `libraryPlaylist`/`libraryAlbum`/`librarySong` key for library
+        // items — a key `setQueue` has never recognized — which is the
+        // actual reason playing a library playlist, or a song from one, did
+        // nothing (or surfaced as a bare "A JavaScript exception occurred"):
+        // the resulting descriptor had no key `setQueue` understood at all.
+        descriptor[kind] = id;
       }
       await m.setQueue(descriptor);
       await m.play();
