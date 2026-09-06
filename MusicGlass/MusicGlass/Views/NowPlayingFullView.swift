@@ -193,10 +193,11 @@ struct NowPlayingFullView: View {
                         Button {
                             showQueue = true
                         } label: {
-                            Label("Up Next", systemImage: "list.bullet")
+                            Image(systemName: "list.bullet")
                                 .font(.system(size: 14, weight: .semibold))
                         }
                         .buttonStyle(GlassButtonStyle())
+                        .accessibilityLabel("Up Next")
 
                         // Not a real MusicKit JS toggle — there's no
                         // confirmed "continue with similar music" API to
