@@ -1,0 +1,90 @@
+name: iOS Unsigned Build
+
+# ---------------------------------------------------------------------------
+# Builds MusicGlass into an UNSIGNED .ipa suitable for local resigning /
+# sideloading (e.g. with a tool like AltStore, or `codesign` + a provisioning
+# profile you already have). There are no signing certificates or
+# provisioning profiles configured here, and none should be added as repo
+# secrets for this workflow — a real App Store / TestFlight distribution
+# build needs its own signed workflow with those secrets wired up separately.
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - main
+      - claude/workflow-ci-ios-build-qypy3j
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+jobs:
+  build-unsigned-ipa:
+    name: Build unsigned IPA
+    runs-on: macos-latest
+
+    env:
+      PROJECT_PATH: MusicGlass/MusicGlass.xcodeproj
+      SCHEME: MusicGlass
+      ARCHIVE_PATH: ${{ github.workspace }}/build/MusicGlass.xcarchive
+      EXPORT_PATH: ${{ github.workspace }}/build/export
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Show available SDKs
+        run: xcodebuild -showsdks
+
+      - name: Build & archive (unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$ARCHIVE_PATH" \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            clean archive
+
+      - name: Package unsigned .ipa from the .xcarchive
+        run: |
+          set -euo pipefail
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/MusicGlass.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Expected app bundle not found at $APP_PATH"
+            find "$ARCHIVE_PATH" -maxdepth 4
+            exit 1
+          fi
+
+          mkdir -p "$EXPORT_PATH/Payload"
+          cp -R "$APP_PATH" "$EXPORT_PATH/Payload/"
+
+          # An .ipa is just a zip of a `Payload/` folder containing the .app.
+          # There's no signing identity or provisioning profile available in
+          # CI, so this produces an UNSIGNED ipa — it needs to be resigned
+          # locally (e.g. via `codesign` + a real provisioning profile, or a
+          # sideloading tool) before it can be installed on a device.
+          (cd "$EXPORT_PATH" && zip -qry "MusicGlass-unsigned.ipa" "Payload")
+
+          mkdir -p "$GITHUB_WORKSPACE/build/output"
+          mv "$EXPORT_PATH/MusicGlass-unsigned.ipa" "$GITHUB_WORKSPACE/build/output/MusicGlass-unsigned.ipa"
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicGlass-unsigned-ipa
+          path: build/output/MusicGlass-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

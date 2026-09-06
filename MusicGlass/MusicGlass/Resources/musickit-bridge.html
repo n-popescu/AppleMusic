@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="apple-music-app-name" content="MusicGlass" />
+  <meta name="apple-music-app-build" content="1.0.0" />
+  <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
+</head>
+<body>
+<script>
+  // ---------------------------------------------------------------------
+  // This page is never shown to the user. It's the hidden engine that:
+  //   1. Authenticates a specific Apple Music account (independent of
+  //      whatever Apple ID the device itself is signed into).
+  //   2. Performs DRM playback via MusicKit JS.
+  //   3. Talks to the Apple Music catalog + library REST endpoints.
+  // Native SwiftUI talks to this file only through window.MusicGlassBridge
+  // and receives events back via webkit.messageHandlers.musicKitEvent.
+  // ---------------------------------------------------------------------
+
+  const post = (payload) => {
+    try {
+      window.webkit.messageHandlers.musicKitEvent.postMessage(payload);
+    } catch (e) {
+      // Running outside a WKWebView (e.g. Safari testing) — ignore.
+      console.log('musicKitEvent ->', payload);
+    }
+  };
+
+  let music = null;
+
+  function attachInstanceListeners(instance) {
+    instance.addEventListener('authorizationStatusDidChange', () => {
+      post({ type: 'authorizationStatusDidChange', isAuthorized: instance.isAuthorized });
+    });
+
+    instance.addEventListener('nowPlayingItemDidChange', () => {
+      const item = instance.nowPlayingItem;
+      if (!item) return;
+      const artworkURL = item.artworkURL
+        ? item.artworkURL
+        : (item.attributes && item.attributes.artwork
+            ? item.attributes.artwork.url.replace('{w}', '600').replace('{h}', '600')
+            : null);
+      post({
+        type: 'nowPlayingItemDidChange',
+        item: {
+          title: item.title || (item.attributes && item.attributes.name) || '',
+          artistName: item.artistName || (item.attributes && item.attributes.artistName) || '',
+          albumName: item.albumName || (item.attributes && item.attributes.albumName) || '',
+          artworkURL: artworkURL,
+          durationSeconds: item.playbackDuration || 0,
+          currentTimeSeconds: instance.currentPlaybackTime || 0,
+          catalogID: item.id || null
+        }
+      });
+    });
+
+    instance.addEventListener('playbackStateDidChange', (e) => {
+      post({ type: 'playbackStateDidChange', state: e.state });
+    });
+
+    instance.addEventListener('playbackTimeDidChange', () => {
+      post({
+        type: 'playbackTimeDidChange',
+        currentTime: instance.currentPlaybackTime || 0,
+        duration: instance.currentPlaybackDuration || 0
+      });
+    });
+  }
+
+  document.addEventListener('musickitloaded', async () => {
+    try {
+      await MusicKit.configure({
+        developerToken: window.MUSICGLASS_DEVELOPER_TOKEN,
+        app: { name: 'MusicGlass', build: '1.0.0' }
+      });
+      music = MusicKit.getInstance();
+      attachInstanceListeners(music);
+      post({ type: 'ready' });
+      post({ type: 'authorizationStatusDidChange', isAuthorized: music.isAuthorized });
+    } catch (err) {
+      post({ type: 'error', message: 'MusicKit configure failed: ' + err.message });
+    }
+  });
+
+  function requireMusic() {
+    if (!music) throw new Error('MusicKit is not configured yet.');
+    return music;
+  }
+
+  function mapSongAttributes(id, a, isLibrary) {
+    return {
+      id: id,
+      name: a.name,
+      artistName: a.artistName,
+      albumName: a.albumName || null,
+      durationInMillis: a.durationInMillis || null,
+      artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
+      releaseDate: a.releaseDate || null,
+      playParams: a.playParams
+        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
+        : { id: id, kind: 'song', isLibrary: !!isLibrary }
+    };
+  }
+
+  function mapAlbumAttributes(id, a, isLibrary) {
+    return {
+      id: id,
+      name: a.name,
+      artistName: a.artistName,
+      artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
+      trackCount: a.trackCount || null,
+      releaseDate: a.releaseDate || null,
+      playParams: a.playParams
+        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
+        : { id: id, kind: 'album', isLibrary: !!isLibrary }
+    };
+  }
+
+  // Maps a *queue* item, which MusicKit JS represents as a `MediaItem`
+  // instance rather than a raw catalog/library attributes payload — most
+  // fields live directly on the item, with `.attributes` only present in
+  // some MusicKit JS versions as a fallback.
+  function mapQueueItem(item) {
+    const attrs = item.attributes || {};
+    const artwork = item.artwork || attrs.artwork;
+    return {
+      id: item.id || attrs.id || '',
+      name: item.title || attrs.name || '',
+      artistName: item.artistName || attrs.artistName || '',
+      albumName: item.albumName || attrs.albumName || null,
+      artwork: artwork ? { width: artwork.width, height: artwork.height, url: artwork.url } : null,
+      durationInMillis: item.playbackDuration ? Math.round(item.playbackDuration * 1000) : (attrs.durationInMillis || null)
+    };
+  }
+
+  function mapArtistAttributes(id, a) {
+    return {
+      id: id,
+      name: a.name,
+      artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null
+    };
+  }
+
+  function mapPlaylistAttributes(id, a, isLibrary) {
+    return {
+      id: id,
+      name: a.name,
+      curatorName: a.curatorName || null,
+      artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
+      trackCount: a.trackCount || null,
+      description: a.description ? (a.description.standard || a.description.short || null) : null,
+      playParams: a.playParams
+        ? { id: a.playParams.id, kind: a.playParams.kind, isLibrary: !!isLibrary }
+        : { id: id, kind: 'playlist', isLibrary: !!isLibrary }
+    };
+  }
+
+  window.MusicGlassBridge = {
+
+    // ---- Auth ----
+    // Opens Apple's own music.apple.com sign-in popup/window. The account
+    // that logs in here is completely independent of the device's system
+    // Apple ID / Media & Purchases account.
+    authorize: async function () {
+      const m = requireMusic();
+      await m.authorize();
+    },
+
+    unauthorize: async function () {
+      const m = requireMusic();
+      await m.unauthorize();
+    },
+
+    // ---- Playback ----
+    play: async function () { await requireMusic().play(); },
+    pause: async function () { await requireMusic().pause(); },
+    skipToNext: async function () { await requireMusic().skipToNextItem(); },
+    skipToPrevious: async function () { await requireMusic().skipToPreviousItem(); },
+    seek: async function (seconds) { requireMusic().seekToTime(seconds); },
+
+    setQueueAndPlay: async function (id, kind, isLibrary) {
+      const m = requireMusic();
+      const descriptor = {};
+      const key = isLibrary ? 'library' + kind.charAt(0).toUpperCase() + kind.slice(1) : kind;
+      descriptor[key] = [id];
+      await m.setQueue(descriptor);
+      await m.play();
+    },
+
+    // ---- Library ----
+    fetchLibraryPlaylists: async function () {
+      const m = requireMusic();
+      const res = await m.api.music('/v1/me/library/playlists', { limit: 100 });
+      const data = res.data.data || [];
+      return data.map(d => mapPlaylistAttributes(d.id, d.attributes, true));
+    },
+
+    fetchLibraryAlbums: async function () {
+      const m = requireMusic();
+      const res = await m.api.music('/v1/me/library/albums', { limit: 100 });
+      const data = res.data.data || [];
+      return data.map(d => mapAlbumAttributes(d.id, d.attributes, true));
+    },
+
+    fetchLibraryArtists: async function () {
+      const m = requireMusic();
+      const res = await m.api.music('/v1/me/library/artists', { limit: 100 });
+      const data = res.data.data || [];
+      return data.map(d => mapArtistAttributes(d.id, d.attributes));
+    },
+
+    fetchLibrarySongs: async function () {
+      const m = requireMusic();
+      const res = await m.api.music('/v1/me/library/songs', { limit: 100 });
+      const data = res.data.data || [];
+      return data.map(d => mapSongAttributes(d.id, d.attributes, true));
+    },
+
+    fetchPlaylistTracks: async function (id) {
+      const m = requireMusic();
+      const res = await m.api.music(`/v1/me/library/playlists/${id}/tracks`, { limit: 100 });
+      const data = res.data.data || [];
+      return data.map(d => mapSongAttributes(d.id, d.attributes, true));
+    },
+
+    fetchAlbumTracks: async function (id) {
+      const m = requireMusic();
+      const res = await m.api.music(`/v1/me/library/albums/${id}/tracks`, { limit: 100 });
+      const data = res.data.data || [];
+      return data.map(d => mapSongAttributes(d.id, d.attributes, true));
+    },
+
+    // ---- Queue (Up Next) ----
+    // MusicKit JS keeps the live playback queue on `music.queue`. `.items` is
+    // an array of MediaItem, `.position` is the index currently playing.
+    fetchQueue: async function () {
+      const m = requireMusic();
+      const q = m.queue;
+      const items = (q && q.items) ? q.items : [];
+      return {
+        position: (q && typeof q.position === 'number') ? q.position : -1,
+        items: items.map(mapQueueItem)
+      };
+    },
+
+    jumpToQueueItem: async function (index) {
+      const m = requireMusic();
+      // `changeToMediaAtIndex` is MusicKit JS's public API for jumping within
+      // the current queue without rebuilding it.
+      await m.changeToMediaAtIndex(index);
+    },
+
+    // Best-effort reorder: MusicKit JS doesn't publish a first-class "move
+    // item in queue" API, so this rebuilds the queue from the current array
+    // with the item moved, then resumes at the same track. This can cause a
+    // brief playback hiccup and should be treated as best-effort until
+    // verified against a real MusicKit JS release.
+    moveQueueItem: async function (from, to) {
+      const m = requireMusic();
+      const q = m.queue;
+      if (!q || !q.items || from < 0 || from >= q.items.length) return;
+      const items = q.items.slice();
+      const [moved] = items.splice(from, 1);
+      items.splice(Math.max(0, Math.min(to, items.length)), 0, moved);
+
+      const wasPlayingIndex = q.position;
+      const currentlyPlayingItem = (wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
+        ? q.items[wasPlayingIndex]
+        : null;
+
+      const descriptor = { items: items.map(i => ({ id: i.id, kind: (i.playParams && i.playParams.kind) || 'song' })) };
+      await m.setQueue(descriptor);
+
+      // Resume from wherever the previously-playing item ended up.
+      if (currentlyPlayingItem) {
+        const newIndex = items.findIndex(i => i.id === currentlyPlayingItem.id);
+        if (newIndex >= 0) {
+          await m.changeToMediaAtIndex(newIndex);
+        }
+      }
+    },
+
+    // ---- Search (catalog) ----
+    search: async function (term) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      const res = await m.api.music(`/v1/catalog/${storefront}/search`, {
+        term: term,
+        types: 'songs,albums,artists,playlists',
+        limit: 25
+      });
+      const results = res.data.results || {};
+      return {
+        songs: (results.songs ? results.songs.data : []).map(d => mapSongAttributes(d.id, d.attributes, false)),
+        albums: (results.albums ? results.albums.data : []).map(d => mapAlbumAttributes(d.id, d.attributes, false)),
+        artists: (results.artists ? results.artists.data : []).map(d => mapArtistAttributes(d.id, d.attributes)),
+        playlists: (results.playlists ? results.playlists.data : []).map(d => mapPlaylistAttributes(d.id, d.attributes, false))
+      };
+    }
+  };
+</script>
+</body>
+</html>
