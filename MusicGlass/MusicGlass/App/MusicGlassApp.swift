@@ -22,7 +22,12 @@ struct MusicGlassApp: App {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true)
+            // Deliberately NOT setActive(true) here. Activating a .playback
+            // session takes the audio route and interrupts whatever else is
+            // playing — so merely opening this app would stop the podcast or
+            // music already coming out of the phone, before anyone had asked
+            // it to play anything. Activation happens when playback actually
+            // starts; see NowPlayingRemoteController.activateSessionIfNeeded.
         } catch {
             // Playback may still work without this (e.g. audio simply won't
             // continue in the background, or will respect the silent switch),

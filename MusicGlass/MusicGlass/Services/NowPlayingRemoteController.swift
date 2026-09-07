@@ -1,5 +1,6 @@
 import Foundation
 import MediaPlayer
+import AVFoundation
 import Combine
 #if canImport(UIKit)
 import UIKit
@@ -39,6 +40,9 @@ final class NowPlayingRemoteController {
     private var lastPushedTime: Double = 0
     private var lastPushedAt: Date = .distantPast
 
+    private var hasActivatedSession = false
+    private var wasPlayingBeforeInterruption = false
+
     /// The running Live Activity, if any. Typed `Any` (rather than
     /// `Activity<MusicGlassActivityAttributes>`) so this property itself
     /// doesn't need an `@available` annotation, which Swift doesn't allow on
@@ -49,6 +53,7 @@ final class NowPlayingRemoteController {
         self.store = store
         configureRemoteCommands()
         observePlaybackState()
+        observeAudioSessionEvents()
         // Disabled: this was assumed to fail silently without a Widget
         // Extension target to render the Live Activity's actual content
         // (see the big comment below), but `Activity.request` apparently
@@ -80,6 +85,81 @@ final class NowPlayingRemoteController {
         #endif
     }
 
+    // MARK: - Audio session
+
+    /// Activates the shared session the first time something actually plays,
+    /// rather than at launch. See MusicGlassApp for why launch is the wrong
+    /// moment (it would interrupt whatever else the phone is already playing).
+    private func activateSessionIfNeeded() {
+        guard !hasActivatedSession else { return }
+        hasActivatedSession = true
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
+    /// Phone calls, alarms and other apps interrupt the session; headphones
+    /// get unplugged. None of this was handled, so a call would silently end
+    /// playback with no way back except tapping play again, and unplugging
+    /// headphones could keep the music going out of the speaker.
+    private func observeAudioSessionEvents() {
+        let center = NotificationCenter.default
+
+        // The notification closure is treated as @Sendable, and Notification
+        // itself isn't Sendable — so the raw values are pulled out inside it
+        // and only those cross onto the MainActor.
+        center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            let typeRaw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let optionsRaw = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            Task { @MainActor [weak self] in
+                self?.handleInterruption(typeRaw: typeRaw, optionsRaw: optionsRaw)
+            }
+        }
+
+        center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            let reasonRaw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor [weak self] in
+                self?.handleRouteChange(reasonRaw: reasonRaw)
+            }
+        }
+    }
+
+    private func handleInterruption(typeRaw: UInt?, optionsRaw: UInt?) {
+        guard let typeRaw, let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
+
+        switch type {
+        case .began:
+            wasPlayingBeforeInterruption = store.bridge.playbackStatus.isPlaying
+            run { try await $0.bridge.pause() }
+        case .ended:
+            // Only resume when the system says we may — an interruption the
+            // person ended by starting something else must not be stomped on.
+            let options = optionsRaw.map { AVAudioSession.InterruptionOptions(rawValue: $0) } ?? []
+            guard options.contains(.shouldResume), wasPlayingBeforeInterruption else { return }
+            wasPlayingBeforeInterruption = false
+            try? AVAudioSession.sharedInstance().setActive(true)
+            run { try await $0.bridge.play() }
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(reasonRaw: UInt?) {
+        guard let reasonRaw,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw),
+              reason == .oldDeviceUnavailable else { return }
+        // Headphones pulled / Bluetooth disconnected: pause, the way every
+        // other music app does, instead of suddenly playing out loud on the
+        // speaker.
+        run { try await $0.bridge.pause() }
+    }
+
     // MARK: - Mirroring MusicKitBridge -> MPNowPlayingInfoCenter
 
     private func observePlaybackState() {
@@ -98,6 +178,8 @@ final class NowPlayingRemoteController {
             lastPushed = nil
             return
         }
+
+        if status.isPlaying { activateSessionIfNeeded() }
 
         let state = PushedState(
             title: nowPlaying.title,
