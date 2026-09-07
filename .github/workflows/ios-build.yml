@@ -201,14 +201,41 @@ jobs:
           set -euo pipefail
           export IPA_SIZE=$(stat -c%s "build/output/Lucent-1.0.0-unsigned.ipa")
           export BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          python3 .github/scripts/update_apps_json.py
 
-          if git diff --quiet -- apps.json; then
-            echo "apps.json unchanged, nothing to commit."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps.json
-          git commit -m "Update SideStore/AltStore source (build $RUN_NUMBER) [skip ci]"
-          git push origin HEAD:main
+
+          # This push races anything else landing on main while the build ran
+          # — most often the next commit of a back-to-back pair. A plain push
+          # then fails the whole workflow *after* the IPA has already been
+          # built, uploaded and released: a red run for bookkeeping that just
+          # needs re-applying on top of whatever arrived.
+          #
+          # apps.json is generated wholesale from the environment, so the
+          # correct recovery is to regenerate it on the newest main rather
+          # than to rebase a commit (a rebase --skip would silently drop the
+          # update while still reporting success).
+          for attempt in 1 2 3 4 5; do
+            python3 .github/scripts/update_apps_json.py
+
+            if git diff --quiet -- apps.json; then
+              echo "apps.json unchanged, nothing to commit."
+              exit 0
+            fi
+
+            git add apps.json
+            git commit -m "Update SideStore/AltStore source (build $RUN_NUMBER) [skip ci]"
+
+            if git push origin HEAD:main; then
+              echo "apps.json pushed on attempt $attempt."
+              exit 0
+            fi
+
+            echo "Push rejected (attempt $attempt) — resetting to origin/main and regenerating."
+            git fetch origin main
+            git reset --hard origin/main
+            sleep $((attempt * 3))
+          done
+
+          echo "::error::Could not push apps.json after 5 attempts."
+          exit 1
