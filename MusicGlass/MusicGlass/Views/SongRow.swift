@@ -3,7 +3,7 @@ import SwiftUI
 struct ArtworkImage: View {
     let artwork: Artwork?
     var size: CGFloat = 52
-    var cornerRadius: CGFloat = 8
+    var cornerRadius: CGFloat = 10
 
     var body: some View {
         AsyncImage(url: artwork?.resolvedURL(size: Int(size * 3))) { phase in
@@ -11,16 +11,30 @@ struct ArtworkImage: View {
             case .success(let image):
                 image.resizable().aspectRatio(contentMode: .fill)
             default:
+                // Placeholder picks up the brand gradient rather than a flat
+                // grey square, so a wall of not-yet-loaded artwork still
+                // looks intentional while it fills in.
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
+                    .fill(
+                        LinearGradient(
+                            colors: [Palette.accent.opacity(0.22), Palette.accentSecondary.opacity(0.20)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .overlay(
                         Image(systemName: "music.note")
-                            .foregroundStyle(.white.opacity(0.4))
+                            .font(.system(size: size * 0.3))
+                            .foregroundStyle(.white.opacity(0.55))
                     )
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+        }
     }
 }
 
@@ -40,25 +54,42 @@ struct SongRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(song.title)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(isCurrentlyPlaying ? .pink : .white)
+                        .foregroundStyle(isCurrentlyPlaying ? Palette.accent : Palette.primaryText)
                         .lineLimit(1)
                     Text(song.artistName)
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(Palette.secondaryText)
                         .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 if store.pendingPlaybackID == song.id {
-                    ProgressView().tint(.pink)
+                    ProgressView().tint(Palette.accent)
                 } else if isCurrentlyPlaying {
-                    Image(systemName: "waveform")
-                        .foregroundStyle(.pink)
+                    // Three static bars reading as a level meter — enough to
+                    // mark the row without animating a whole list.
+                    HStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Capsule()
+                                .fill(Palette.accentGradient)
+                                .frame(width: 3, height: [11.0, 16.0, 8.0][index])
+                        }
+                    }
                 } else {
                     Text(durationLabel)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(Palette.tertiaryText)
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background {
+                // The playing row gets its own soft highlight, so it stays
+                // findable when scrolling a long list.
+                if isCurrentlyPlaying {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Palette.accent.opacity(0.12))
                 }
             }
             .contentShape(Rectangle())
@@ -71,7 +102,7 @@ struct SongRow: View {
             } label: {
                 Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
             }
-            .tint(.pink)
+            .tint(Palette.accent)
         }
         .sheet(isPresented: $showAddToPlaylistSheet) {
             AddToPlaylistSheet(song: song)
@@ -139,7 +170,6 @@ struct AddToPlaylistSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.clear.glassBackdrop()
                 List {
                     Section {
                         HStack {
@@ -157,17 +187,17 @@ struct AddToPlaylistSheet: View {
                             }
                             .disabled(newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
                         }
-                        .listRowBackground(Color.white.opacity(0.05))
+                        .listRowBackground(Palette.contentFill)
                     } header: {
                         Text("New Playlist")
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(Palette.secondaryText)
                     }
 
                     Section {
                         if store.playlists.isEmpty {
                             Text("No playlists yet.")
                                 .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(Palette.tertiaryText)
                                 .listRowBackground(Color.clear)
                         } else {
                             ForEach(store.playlists) { playlist in
@@ -176,7 +206,7 @@ struct AddToPlaylistSheet: View {
                                 } label: {
                                     HStack {
                                         Text(playlist.name)
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(Palette.primaryText)
                                         Spacer()
                                         if isAdding {
                                             ProgressView().tint(.white)
@@ -184,12 +214,12 @@ struct AddToPlaylistSheet: View {
                                     }
                                 }
                                 .disabled(isAdding)
-                                .listRowBackground(Color.white.opacity(0.05))
+                                .listRowBackground(Palette.contentFill)
                             }
                         }
                     } header: {
                         Text("Add to Existing Playlist")
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(Palette.secondaryText)
                     }
 
                     if let confirmationMessage {
@@ -202,6 +232,7 @@ struct AddToPlaylistSheet: View {
                 }
                 .scrollContentBackground(.hidden)
             }
+            .auroraBackground()
             .navigationTitle("Add \u{201c}\(song.title)\u{201d}")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -211,6 +242,7 @@ struct AddToPlaylistSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Palette.background)
     }
 
     private func createAndAdd() async {

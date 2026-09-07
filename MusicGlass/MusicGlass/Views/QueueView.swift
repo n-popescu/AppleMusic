@@ -8,18 +8,15 @@ struct QueueView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.clear.glassBackdrop()
-
-                List {
-                    upNextSection
-                    realRecentlyPlayedSection
-                    sessionRecentlyPlayedSection
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .environment(\.editMode, .constant(.active))
+            List {
+                upNextSection
+                realRecentlyPlayedSection
+                sessionRecentlyPlayedSection
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.editMode, .constant(.active))
+            .auroraBackground()
             .navigationTitle("Queue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -33,6 +30,7 @@ struct QueueView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Palette.background)
     }
 
     @ViewBuilder
@@ -49,7 +47,7 @@ struct QueueView: View {
             } else if store.queue.items.isEmpty {
                 Text("Nothing queued yet. Play something to get started.")
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Palette.tertiaryText)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } else {
@@ -69,7 +67,7 @@ struct QueueView: View {
         } header: {
             Text("Up Next")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(Palette.secondaryText)
         }
     }
 
@@ -89,7 +87,7 @@ struct QueueView: View {
             } header: {
                 Text("Recently Played")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Palette.secondaryText)
             }
         } else if !store.recentlyPlayedHistory.isEmpty {
             Section {
@@ -102,7 +100,7 @@ struct QueueView: View {
             } header: {
                 Text("Recently Played")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Palette.secondaryText)
             }
         }
     }
@@ -120,8 +118,8 @@ struct QueueView: View {
                 HStack(spacing: 12) {
                     ArtworkImage(artwork: album.artwork, size: 44, cornerRadius: 8)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(album.title).font(.system(size: 14, weight: .medium)).foregroundStyle(.white).lineLimit(1)
-                        Text(album.artistName).font(.system(size: 12)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                        Text(album.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.primaryText).lineLimit(1)
+                        Text(album.artistName).font(.system(size: 12)).foregroundStyle(Palette.secondaryText).lineLimit(1)
                     }
                     Spacer()
                 }
@@ -134,9 +132,9 @@ struct QueueView: View {
                 HStack(spacing: 12) {
                     ArtworkImage(artwork: playlist.artwork, size: 44, cornerRadius: 8)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(playlist.name).font(.system(size: 14, weight: .medium)).foregroundStyle(.white).lineLimit(1)
+                        Text(playlist.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.primaryText).lineLimit(1)
                         if let curator = playlist.curatorName {
-                            Text(curator).font(.system(size: 12)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                            Text(curator).font(.system(size: 12)).foregroundStyle(Palette.secondaryText).lineLimit(1)
                         }
                     }
                     Spacer()
@@ -168,7 +166,7 @@ struct QueueView: View {
             } header: {
                 Text("This Session")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Palette.secondaryText)
             }
         }
     }
@@ -185,11 +183,11 @@ private struct QueueRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(isCurrent ? .pink : .white)
+                    .foregroundStyle(isCurrent ? Palette.accent : Palette.primaryText)
                     .lineLimit(1)
                 Text(item.artistName)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Palette.secondaryText)
                     .lineLimit(1)
             }
 
@@ -197,7 +195,7 @@ private struct QueueRow: View {
 
             if isCurrent {
                 Image(systemName: "waveform")
-                    .foregroundStyle(.pink)
+                    .foregroundStyle(Palette.accent)
             }
         }
         .padding(.vertical, 4)

@@ -11,19 +11,21 @@ struct RootView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView {
-                LibraryView()
-                    .tabItem { Label("Library", systemImage: "music.note.list") }
+                HomeView()
+                    .tabItem { Label("Home", systemImage: "house.fill") }
 
-                DiscoverView()
-                    .tabItem { Label("Discover", systemImage: "sparkles") }
+                LibraryView()
+                    .tabItem { Label("Library", systemImage: "square.stack.fill") }
 
                 SearchView()
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
-                SettingsView()
-                    .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                // Took the slot the Account tab used to hold — stations are
+                // real content people listen to, an auth status screen isn't.
+                RadioView()
+                    .tabItem { Label("Radio", systemImage: "dot.radiowaves.left.and.right") }
             }
-            .tint(.pink)
+            .tint(Palette.accent)
 
             NowPlayingBar(showFullPlayer: $showFullPlayer)
                 .padding(.bottom, 50) // sits just above the tab bar
@@ -34,14 +36,8 @@ struct RootView: View {
         // 0x0 frame at opacity 0 — WebKit (like a backgrounded Safari tab)
         // throttles JS execution in a webview it judges isn't actually
         // visible, and a zero-size/zero-opacity view is exactly that signal.
-        // That throttling was invisible for most of this project's life only
-        // because of the call<T>/callVoid bug (see MusicKitBridge.swift)
-        // that made every bridge call return before its JS actually finished
-        // anyway — now that calls genuinely await real completion, the
-        // throttling shows up as calls taking seconds or silently never
-        // resolving. A real (if imperceptible) 1x1 point footprint at a
-        // near-zero-but-nonzero opacity is the standard workaround: enough
-        // for WebKit to keep treating it as an active, unthrottled page.
+        // A real (if imperceptible) 1x1 point footprint at a near-zero-but-
+        // nonzero opacity is the standard workaround.
         .background(
             WebViewHost(webView: store.bridge.webView)
                 .frame(width: 1, height: 1)

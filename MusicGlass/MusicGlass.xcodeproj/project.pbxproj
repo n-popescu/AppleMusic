@@ -15,6 +15,8 @@
 		EC870D7897914A8EB26348E0 /* AlbumDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7FB181DE797491F8EB1A671 /* AlbumDetailView.swift */; };
 		1236618040944EF9AA33EB7F /* ArtistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02FE331D51A742929C8C7F06 /* ArtistDetailView.swift */; };
 		EF470CB043C348B5896D7452 /* AuthPopupSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BBCBF54E22A4C47907D190B /* AuthPopupSheet.swift */; };
+		C1A70D3E4B8F41928E6D2A55 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A70D3E4B8F41928E6D2A56 /* DesignSystem.swift */; };
+		D42B18C7A9E44F1BB03C7E11 /* RadioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42B18C7A9E44F1BB03C7E12 /* RadioView.swift */; };
 		0A0E50505B47459A804E9B7D /* GlassComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F229CB9ACAE402D84DA806E /* GlassComponents.swift */; };
 		2C72C12D668C49E3BA87AB71 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED2E5F61A294EA6A9557B8D /* LibraryView.swift */; };
 		B6B366A7838942ADA03395FF /* NowPlayingBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC11D1628914847B66D25DA /* NowPlayingBar.swift */; };
@@ -28,7 +30,7 @@
 		48E89310837D4B8B8CF48880 /* musickit-bridge.html in Resources */ = {isa = PBXBuildFile; fileRef = 61492DBE2832478788D6351A /* musickit-bridge.html */; };
 		4F5748DC56C3410CA25D1343 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E31B8899C545477488893A81 /* Assets.xcassets */; };
 		B9790AB5E830422BBAA2E236 /* AirPlayButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD7661444AF484593402647 /* AirPlayButton.swift */; };
-		DAB0BCF27DD8429F8CFDFEF0 /* DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6974F46775A4B2882312546 /* DiscoverView.swift */; };
+		DAB0BCF27DD8429F8CFDFEF0 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6974F46775A4B2882312546 /* HomeView.swift */; };
 		A6EC2D1218E44DA6983DB63C /* MusicGlassActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0919727F252A43D09B9F26FE /* MusicGlassActivityAttributes.swift */; };
 		B4ACE4CFCAB149889A88B3CA /* PlayMediaIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC9B8E36E234AF3B0FF8A95 /* PlayMediaIntent.swift */; };
 		87E03DD4C695470A81920FC0 /* TogglePlaybackIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6A6EE808F0415A815CAC16 /* TogglePlaybackIntent.swift */; };
@@ -44,6 +46,8 @@
 		B7FB181DE797491F8EB1A671 /* AlbumDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDetailView.swift; sourceTree = "<group>"; };
 		02FE331D51A742929C8C7F06 /* ArtistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistDetailView.swift; sourceTree = "<group>"; };
 		5BBCBF54E22A4C47907D190B /* AuthPopupSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthPopupSheet.swift; sourceTree = "<group>"; };
+		C1A70D3E4B8F41928E6D2A56 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		D42B18C7A9E44F1BB03C7E12 /* RadioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioView.swift; sourceTree = "<group>"; };
 		2F229CB9ACAE402D84DA806E /* GlassComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassComponents.swift; sourceTree = "<group>"; };
 		DED2E5F61A294EA6A9557B8D /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		5EC11D1628914847B66D25DA /* NowPlayingBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingBar.swift; sourceTree = "<group>"; };
@@ -59,7 +63,7 @@
 		6AD7661444AF484593402647 /* AirPlayButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayButton.swift; sourceTree = "<group>"; };
 		69AFD26AE65941DFBC4315B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		19777773E2494FA983888517 /* MusicGlass.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicGlass.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B6974F46775A4B2882312546 /* DiscoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverView.swift; sourceTree = "<group>"; };
+		B6974F46775A4B2882312546 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		0919727F252A43D09B9F26FE /* MusicGlassActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicGlassActivityAttributes.swift; sourceTree = "<group>"; };
 		CCC9B8E36E234AF3B0FF8A95 /* PlayMediaIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayMediaIntent.swift; sourceTree = "<group>"; };
 		7A6A6EE808F0415A815CAC16 /* TogglePlaybackIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TogglePlaybackIntent.swift; sourceTree = "<group>"; };
@@ -121,6 +125,8 @@
 				02FE331D51A742929C8C7F06 /* ArtistDetailView.swift */,
 				6AD7661444AF484593402647 /* AirPlayButton.swift */,
 				5BBCBF54E22A4C47907D190B /* AuthPopupSheet.swift */,
+				C1A70D3E4B8F41928E6D2A56 /* DesignSystem.swift */,
+				D42B18C7A9E44F1BB03C7E12 /* RadioView.swift */,
 				2F229CB9ACAE402D84DA806E /* GlassComponents.swift */,
 				DED2E5F61A294EA6A9557B8D /* LibraryView.swift */,
 				5EC11D1628914847B66D25DA /* NowPlayingBar.swift */,
@@ -131,7 +137,7 @@
 				34A754490E5E420E89A48B16 /* SearchView.swift */,
 				FC93FD9930FB4ED38972838D /* SettingsView.swift */,
 				3E85C816B4BF46E7BB9DFC9E /* SongRow.swift */,
-				B6974F46775A4B2882312546 /* DiscoverView.swift */,
+				B6974F46775A4B2882312546 /* HomeView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -254,6 +260,8 @@
 				1236618040944EF9AA33EB7F /* ArtistDetailView.swift in Sources */,
 				B9790AB5E830422BBAA2E236 /* AirPlayButton.swift in Sources */,
 				EF470CB043C348B5896D7452 /* AuthPopupSheet.swift in Sources */,
+				C1A70D3E4B8F41928E6D2A55 /* DesignSystem.swift in Sources */,
+				D42B18C7A9E44F1BB03C7E11 /* RadioView.swift in Sources */,
 				0A0E50505B47459A804E9B7D /* GlassComponents.swift in Sources */,
 				2C72C12D668C49E3BA87AB71 /* LibraryView.swift in Sources */,
 				B6B366A7838942ADA03395FF /* NowPlayingBar.swift in Sources */,
@@ -264,7 +272,7 @@
 				D4FCB15F10AD44B285886C19 /* SearchView.swift in Sources */,
 				B8DED8B4FB7242519EF9981A /* SettingsView.swift in Sources */,
 				31D08A4D044445BFBB65E042 /* SongRow.swift in Sources */,
-				DAB0BCF27DD8429F8CFDFEF0 /* DiscoverView.swift in Sources */,
+				DAB0BCF27DD8429F8CFDFEF0 /* HomeView.swift in Sources */,
 				A6EC2D1218E44DA6983DB63C /* MusicGlassActivityAttributes.swift in Sources */,
 				B4ACE4CFCAB149889A88B3CA /* PlayMediaIntent.swift in Sources */,
 				87E03DD4C695470A81920FC0 /* TogglePlaybackIntent.swift in Sources */,

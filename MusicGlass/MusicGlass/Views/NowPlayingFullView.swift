@@ -9,6 +9,7 @@ struct NowPlayingFullView: View {
     @State private var volumeValue: Double = 1
     @State private var isAdjustingVolume = false
     @State private var showAddToPlaylistSheet = false
+    @StateObject private var accent = ArtworkAccent()
 
     var body: some View {
         let info = store.bridge.nowPlaying
@@ -24,6 +25,19 @@ struct NowPlayingFullView: View {
 
             ZStack {
                 Color.black.ignoresSafeArea()
+
+                // Colour wash derived from the artwork. Sits under the blurred
+                // image so the screen is already tinted the moment it opens,
+                // rather than flashing black until the 1200pt art downloads.
+                if let color = accent.color {
+                    LinearGradient(
+                        colors: [color.opacity(0.85), color.opacity(0.25), .black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                }
 
                 // Blurred artwork backdrop for a "glass over content" feel.
                 // This had no frame of its own, so with `.fill` it sized to
@@ -44,7 +58,12 @@ struct NowPlayingFullView: View {
                 .clipped()
                 .ignoresSafeArea()
 
-                Color.black.opacity(0.4).ignoresSafeArea()
+                LinearGradient(
+                    colors: [.black.opacity(0.25), .black.opacity(0.55), .black.opacity(0.8)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 VStack(spacing: spacing) {
                     ZStack {
@@ -59,7 +78,7 @@ struct NowPlayingFullView: View {
                             } label: {
                                 Image(systemName: "ellipsis.circle")
                                     .font(.system(size: 20))
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .foregroundStyle(Palette.secondaryText)
                                     .contentShape(Circle())
                             }
                             .disabled(info.catalogID == nil)
@@ -68,17 +87,21 @@ struct NowPlayingFullView: View {
                     }
                     .padding(.top, 10)
 
-                    ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: artworkSize, cornerRadius: 24)
-                        .shadow(radius: 20)
+                    ArtworkImage(artwork: Artwork(width: nil, height: nil, url: info.artworkURL ?? ""), size: artworkSize, cornerRadius: 26)
+                        .shadow(color: .black.opacity(0.6), radius: 32, y: 18)
+                        .scaleEffect(store.bridge.playbackStatus.isPlaying ? 1.0 : 0.94)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: store.bridge.playbackStatus.isPlaying)
 
                     VStack(spacing: 6) {
                         Text(info.title)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 23, weight: .bold, design: .rounded))
+                            .foregroundStyle(Palette.primaryText)
                             .multilineTextAlignment(.center)
+                            .lineLimit(2)
                         Text(info.artistName)
-                            .font(.system(size: 16))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Palette.secondaryText)
+                            .lineLimit(1)
                     }
                     .padding(.horizontal, 24)
 
@@ -96,79 +119,81 @@ struct NowPlayingFullView: View {
                                 }
                             }
                         )
-                        .tint(.white)
+                        .tint(Palette.accent)
 
                         HStack {
-                            Text(timeLabel(store.bridge.currentTime))
+                            Text(timeLabel(isScrubbing ? scrubberValue : store.bridge.currentTime))
                             Spacer()
-                            Text(timeLabel(store.bridge.duration))
+                            Text("-" + timeLabel(max(store.bridge.duration - (isScrubbing ? scrubberValue : store.bridge.currentTime), 0)))
                         }
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(Palette.tertiaryText)
                     }
                     .padding(.horizontal, 24)
 
                     // Five buttons at a fixed 28pt gap came to ~354pt, which
                     // overflows the narrower phones once horizontal padding
                     // is accounted for — hence the squeezed/clipped row.
-                    HStack(spacing: proxy.size.width < 380 ? 14 : 24) {
-                        Button {
-                            Task { await store.setShuffleMode(store.bridge.shuffleMode == .off ? .songs : .off) }
-                        } label: {
-                            if store.isTogglingPlaybackMode {
-                                ProgressView().tint(.white)
-                            } else {
-                                Image(systemName: "shuffle")
-                                    .font(.system(size: 16, weight: .semibold))
+                    GlassGroup(spacing: 20) {
+                        HStack(spacing: proxy.size.width < 380 ? 14 : 24) {
+                            Button {
+                                Task { await store.setShuffleMode(store.bridge.shuffleMode == .off ? .songs : .off) }
+                            } label: {
+                                if store.isTogglingPlaybackMode {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: "shuffle")
+                                        .font(.system(size: 16, weight: .semibold))
+                                }
                             }
-                        }
-                        .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? .pink : nil))
-                        .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
-                        .disabled(store.isTogglingPlaybackMode)
+                            .buttonStyle(GlassButtonStyle(tint: store.bridge.shuffleMode == .songs ? Palette.accent : nil))
+                            .foregroundStyle(store.bridge.shuffleMode == .songs ? .white : .white.opacity(0.6))
+                            .disabled(store.isTogglingPlaybackMode)
 
-                        Button { Task { await store.skipToPrevious() } } label: {
-                            Image(systemName: "backward.fill").font(.system(size: 22))
-                        }
-                        .buttonStyle(GlassButtonStyle())
-                        .disabled(store.isTransportBusy)
-
-                        Button { Task { await store.togglePlayPause() } } label: {
-                            if store.isTransportBusy || store.bridge.playbackStatus.isBusy {
-                                ProgressView().tint(.white)
-                            } else {
-                                Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 30))
+                            Button { Task { await store.skipToPrevious() } } label: {
+                                Image(systemName: "backward.fill").font(.system(size: 22))
                             }
-                        }
-                        .buttonStyle(GlassButtonStyle(tint: .pink))
-                        .disabled(store.isTransportBusy)
+                            .buttonStyle(GlassButtonStyle())
+                            .disabled(store.isTransportBusy)
 
-                        Button { Task { await store.skipToNext() } } label: {
-                            Image(systemName: "forward.fill").font(.system(size: 22))
-                        }
-                        .buttonStyle(GlassButtonStyle())
-                        .disabled(store.isTransportBusy)
-
-                        Button {
-                            Task { await store.cycleRepeatMode() }
-                        } label: {
-                            if store.isTogglingPlaybackMode {
-                                ProgressView().tint(.white)
-                            } else {
-                                Image(systemName: repeatIconName)
-                                    .font(.system(size: 16, weight: .semibold))
+                            Button { Task { await store.togglePlayPause() } } label: {
+                                if store.isTransportBusy || store.bridge.playbackStatus.isBusy {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: store.bridge.playbackStatus.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 30))
+                                }
                             }
+                            .buttonStyle(GlassButtonStyle(tint: Palette.accent, size: 26))
+                            .disabled(store.isTransportBusy)
+
+                            Button { Task { await store.skipToNext() } } label: {
+                                Image(systemName: "forward.fill").font(.system(size: 22))
+                            }
+                            .buttonStyle(GlassButtonStyle())
+                            .disabled(store.isTransportBusy)
+
+                            Button {
+                                Task { await store.cycleRepeatMode() }
+                            } label: {
+                                if store.isTogglingPlaybackMode {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: repeatIconName)
+                                        .font(.system(size: 16, weight: .semibold))
+                                }
+                            }
+                            .buttonStyle(GlassButtonStyle(tint: store.bridge.repeatMode == .off ? nil : Palette.accent))
+                            .foregroundStyle(store.bridge.repeatMode == .off ? .white.opacity(0.6) : .white)
+                            .disabled(store.isTogglingPlaybackMode)
                         }
-                        .buttonStyle(GlassButtonStyle(tint: store.bridge.repeatMode == .off ? nil : .pink))
-                        .foregroundStyle(store.bridge.repeatMode == .off ? .white.opacity(0.6) : .white)
-                        .disabled(store.isTogglingPlaybackMode)
+                        .foregroundStyle(.white)
                     }
-                    .foregroundStyle(.white)
 
                     HStack(spacing: 10) {
                         Image(systemName: "speaker.fill")
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(Palette.tertiaryText)
                         Slider(
                             value: Binding(
                                 get: { isAdjustingVolume ? volumeValue : store.bridge.volume },
@@ -182,10 +207,10 @@ struct NowPlayingFullView: View {
                                 }
                             }
                         )
-                        .tint(.white)
+                        .tint(Palette.primaryText.opacity(0.85))
                         Image(systemName: "speaker.wave.3.fill")
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(Palette.tertiaryText)
                     }
                     .padding(.horizontal, 24)
 
@@ -215,7 +240,7 @@ struct NowPlayingFullView: View {
                             Label("Autoplay", systemImage: "infinity")
                                 .font(.system(size: 14, weight: .semibold))
                         }
-                        .buttonStyle(GlassButtonStyle(tint: store.isAutoplayEnabled ? .pink : nil))
+                        .buttonStyle(GlassButtonStyle(tint: store.isAutoplayEnabled ? Palette.accent : nil))
                         .foregroundStyle(store.isAutoplayEnabled ? .white : .white.opacity(0.6))
 
                         AirPlayButton(tintColor: .white)
@@ -237,6 +262,12 @@ struct NowPlayingFullView: View {
             }
         }
         .presentationDragIndicator(.hidden)
+        .task(id: store.bridge.nowPlaying.artworkURL) {
+            await accent.load(
+                from: Artwork(width: nil, height: nil, url: store.bridge.nowPlaying.artworkURL ?? "")
+            )
+        }
+        .animation(.easeInOut(duration: 0.5), value: accent.color)
         .sheet(isPresented: $showQueue) {
             QueueView()
                 .environmentObject(store)
