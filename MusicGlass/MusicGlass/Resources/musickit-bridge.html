@@ -101,6 +101,7 @@
     instance.addEventListener('nowPlayingItemDidChange', () => {
       const item = instance.nowPlayingItem;
       if (!item) return;
+      updateMediaSessionMetadata(item);
       const artworkURL = item.artworkURL
         ? item.artworkURL
         : (item.attributes && item.attributes.artwork
@@ -122,6 +123,12 @@
 
     instance.addEventListener('playbackStateDidChange', (e) => {
       post({ type: 'playbackStateDidChange', state: e.state });
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.playbackState =
+            (e.state === 2 || instance.isPlaying === true) ? 'playing' : 'paused';
+        } catch (err) {}
+      }
     });
 
     instance.addEventListener('playbackTimeDidChange', () => {
@@ -173,12 +180,40 @@
   // silently became a constant 0 on every playbackTimeDidChange tick, and
   // the only genuinely correct-looking update came from wherever else in
   // the app happened to recompute state around a pause/play transition.
+  // MusicKit's own currentPlaybackTime is refreshed by an internal JS timer,
+  // and WebKit throttles a hidden page's timers regardless of whether the app
+  // is foregrounded — so that property itself goes stale, and polling it from
+  // native (which is not throttled) faithfully reports a stale number. That's
+  // why the progress bar still only moved at a state change like pause even
+  // after the native polling loop was added: the poll was working, the value
+  // it read was not.
+  //
+  // The underlying <audio> element's own currentTime is maintained by the
+  // media pipeline itself, not by any JS timer, so it stays correct no matter
+  // how hard the page is throttled. Prefer it, and keep the MusicKit
+  // properties as the fallback for builds where no element is reachable.
+  function mediaElement() {
+    const els = document.getElementsByTagName('audio');
+    for (let i = 0; i < els.length; i++) {
+      if (els[i] && typeof els[i].currentTime === 'number' && !els[i].paused) return els[i];
+    }
+    return els.length ? els[0] : null;
+  }
+
   function currentPlaybackTime() {
+    const el = mediaElement();
+    if (el && typeof el.currentTime === 'number' && isFinite(el.currentTime) && el.currentTime > 0) {
+      return el.currentTime;
+    }
     if (music.player && typeof music.player.currentPlaybackTime === 'number') return music.player.currentPlaybackTime;
     if (typeof music.currentPlaybackTime === 'number') return music.currentPlaybackTime;
     return 0;
   }
   function currentPlaybackDuration() {
+    const el = mediaElement();
+    if (el && typeof el.duration === 'number' && isFinite(el.duration) && el.duration > 0) {
+      return el.duration;
+    }
     if (music.player && typeof music.player.currentPlaybackDuration === 'number') return music.player.currentPlaybackDuration;
     if (typeof music.currentPlaybackDuration === 'number') return music.currentPlaybackDuration;
     return 0;
@@ -195,6 +230,77 @@
     return (music && music.queue) || (music && music.player && music.player.queue) || null;
   }
 
+  // ---- Media Session (lock screen / Control Center controls) ----
+  //
+  // This is very likely the real reason the Lock Screen shows a "skip 10
+  // seconds" button rather than next/previous, and why configuring
+  // MPRemoteCommandCenter natively never changed it.
+  //
+  // The audio here is produced by an <audio> element inside this WKWebView,
+  // not by native AVPlayer code. WebKit therefore owns the system Now Playing
+  // session for it, and it populates that session from THIS PAGE's
+  // `navigator.mediaSession`, not from whatever the host app registered on
+  // MPRemoteCommandCenter. Per the Media Session API, the user agent shows
+  // controls for the actions that actually have handlers registered — so with
+  // no `nexttrack`/`previoustrack` handler on the page, WebKit falls back to
+  // its default seek-by-seconds controls for a media element. Registering the
+  // handlers here is what puts real track controls on the Lock Screen, and
+  // explicitly clearing the seek actions is what removes the skip buttons
+  // competing for the same slots.
+  function setupMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+
+    function handler(name, fn) {
+      try { ms.setActionHandler(name, fn); } catch (e) {}
+    }
+
+    handler('play', async () => { try { await music.play(); } catch (e) {} });
+    handler('pause', async () => { try { await music.pause(); } catch (e) {} });
+    handler('nexttrack', async () => { try { await music.skipToNextItem(); } catch (e) {} });
+    handler('previoustrack', async () => { try { await music.skipToPreviousItem(); } catch (e) {} });
+    handler('stop', async () => { try { await music.stop(); } catch (e) {} });
+
+    // Explicitly unregistered: these are what WebKit offers by default for a
+    // plain media element, and they're what was occupying the Lock Screen.
+    handler('seekforward', null);
+    handler('seekbackward', null);
+
+    handler('seekto', async (details) => {
+      if (details && typeof details.seekTime === 'number') {
+        try { await music.seekToTime(details.seekTime); } catch (e) {}
+      }
+    });
+  }
+
+  // Metadata has to be refreshed per track, and re-asserting the handlers
+  // alongside it is deliberate: WebKit can reset the session when the element
+  // switches source, which would silently put the seek buttons back.
+  function updateMediaSessionMetadata(item) {
+    if (!('mediaSession' in navigator) || !window.MediaMetadata) return;
+    try {
+      const attrs = (item && item.attributes) || {};
+      const artwork = [];
+      const art = item && (item.artwork || attrs.artwork);
+      if (art && art.url) {
+        [256, 512].forEach(size => {
+          artwork.push({
+            src: art.url.replace('{w}', size).replace('{h}', size),
+            sizes: size + 'x' + size,
+            type: 'image/jpeg'
+          });
+        });
+      }
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: attrs.name || (item && item.title) || '',
+        artist: attrs.artistName || '',
+        album: attrs.albumName || '',
+        artwork: artwork
+      });
+    } catch (e) {}
+    setupMediaSession();
+  }
+
   document.addEventListener('musickitloaded', async () => {
     try {
       await MusicKit.configure({
@@ -203,6 +309,7 @@
       });
       music = MusicKit.getInstance();
       attachInstanceListeners(music);
+      setupMediaSession();
       post({ type: 'ready' });
       if (!music.isAuthorized && window.MUSICGLASS_STORED_USER_TOKEN) {
         await restoreUserToken(window.MUSICGLASS_STORED_USER_TOKEN);
@@ -916,14 +1023,53 @@
     // untouched queue, and the row visibly snaps back. The MediaItem objects
     // already in `q.items` are themselves valid descriptors and carry their
     // own type, so they're passed through as-is.
+    // MusicKit JS still publishes no "move item in queue" API, so this tries
+    // the least destructive thing that works, in order.
+    //
+    // The previous version went straight to a setQueue rebuild followed by
+    // changeToMediaAtIndex, which is exactly why reordering restarted the
+    // current song: changeToMediaAtIndex always starts an item from the
+    // beginning, and a seekToTime chaser after it is a race. It also
+    // reshuffled, because rebuilding a queue while shuffleMode is on makes
+    // MusicKit shuffle the new queue.
     moveQueueItem: async function (from, to) {
       const m = requireMusic();
       const q = queueObject();
       if (!q || !q.items || from < 0 || from >= q.items.length) return { moved: false };
 
+      const target = Math.max(0, Math.min(to, q.items.length - 1));
+      if (target === from) return { moved: true, inPlace: true };
+
+      const expected = q.items.map(i => i.id);
+      const [movedId] = expected.splice(from, 1);
+      expected.splice(target, 0, movedId);
+
+      // 1. In place. If `items` (or the internal `_queueItems`) is the live
+      //    array rather than a copy, splicing it reorders the real queue with
+      //    no rebuild at all: nothing restarts, nothing reshuffles, playback
+      //    is not touched. Whether that holds is build-dependent, so it's
+      //    attempted and then verified rather than assumed.
+      const candidates = [q.items, q._queueItems].filter(a => Array.isArray(a));
+      for (const arr of candidates) {
+        try {
+          const [item] = arr.splice(from, 1);
+          arr.splice(target, 0, item);
+          const now = queueObject();
+          if (now && now.items && now.items.map(i => i.id).join('\u0000') === expected.join('\u0000')) {
+            return { moved: true, inPlace: true };
+          }
+          // Didn't take (it was a copy) — undo so the next attempt starts clean.
+          const [undo] = arr.splice(target, 1);
+          arr.splice(from, 0, undo);
+        } catch (e) {}
+      }
+
+      // 2. Rebuild. Reordered items, resumed at the same track AND the same
+      //    playback position via setQueue's own startWith/startTime, rather
+      //    than a changeToMediaAtIndex afterwards that would restart it.
       const items = q.items.slice();
       const [moved] = items.splice(from, 1);
-      items.splice(Math.max(0, Math.min(to, items.length)), 0, moved);
+      items.splice(target, 0, moved);
 
       const wasPlayingIndex = (typeof q.position === 'number') ? q.position : -1;
       const currentItem = (wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
@@ -931,25 +1077,41 @@
         : null;
       const resumeAt = currentPlaybackTime();
       const wasPlaying = m.isPlaying === true || m.playbackState === 2;
+      const newIndex = currentItem ? items.findIndex(i => i.id === currentItem.id) : -1;
 
-      await m.setQueue({ items: items });
+      // Rebuilding with shuffle on re-shuffles what was just deliberately
+      // reordered, which makes the whole gesture pointless. Turn it off for
+      // the rebuild and leave it off: the person has now hand-ordered this
+      // queue, so honouring that order is the only coherent reading. The
+      // flag lets the native side refresh its shuffle UI to match.
+      let shuffleWasOn = false;
+      try {
+        shuffleWasOn = (m.shuffleMode !== 0 && m.shuffleMode !== undefined);
+        if (shuffleWasOn) m.shuffleMode = 0;
+      } catch (e) {}
 
-      if (currentItem) {
-        const newIndex = items.findIndex(i => i.id === currentItem.id);
-        if (newIndex >= 0) {
-          await m.changeToMediaAtIndex(newIndex);
-          // Put the needle back where it was. Without this the reorder is
-          // technically correct and still feels broken, because the song
-          // you're listening to jumps back to the beginning.
-          if (resumeAt > 1) {
-            try { await m.seekToTime(resumeAt); } catch (e) {}
-          }
-          if (wasPlaying) {
-            try { await m.play(); } catch (e) {}
-          }
-        }
+      const options = { items: items };
+      if (newIndex >= 0) {
+        options.startWith = newIndex;
+        if (resumeAt > 1) options.startTime = resumeAt;
       }
-      return { moved: true };
+      options.startPlaying = wasPlaying;
+
+      await m.setQueue(options);
+
+      // If this build ignored startWith/startTime, fall back to the explicit
+      // pair rather than leaving playback on the wrong item.
+      try {
+        const after = queueObject();
+        if (newIndex >= 0 && after && after.position !== newIndex) {
+          await m.changeToMediaAtIndex(newIndex);
+          if (resumeAt > 1) { try { await m.seekToTime(resumeAt); } catch (e) {} }
+          if (wasPlaying) { try { await m.play(); } catch (e) {} }
+        }
+      } catch (e) {}
+
+      if (shuffleWasOn) postPlaybackModes();
+      return { moved: true, inPlace: false, shuffleDisabled: shuffleWasOn };
     },
 
     // `MusicKit.Queue.remove(index)` has existed since MusicKit JS build 129

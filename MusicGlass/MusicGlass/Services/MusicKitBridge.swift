@@ -213,13 +213,17 @@ final class MusicKitBridge: NSObject, ObservableObject {
     private func startPlaybackTimePolling() {
         Task { [weak self] in
             while let self, !Task.isCancelled {
+                var isPlaying = false
                 if self.isReady {
+                    isPlaying = self.playbackStatus.isPlaying
                     if let time = try? await self.fetchPlaybackTime() {
                         self.currentTime = time.currentTime
                         self.duration = time.duration
                     }
                 }
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                // Tighter while playing so the bar moves smoothly; slower
+                // otherwise, since nothing is changing between state events.
+                try? await Task.sleep(nanoseconds: isPlaying ? 250_000_000 : 1_000_000_000)
             }
         }
     }
