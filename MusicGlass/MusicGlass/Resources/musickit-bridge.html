@@ -846,6 +846,20 @@
       });
     },
 
+    // Re-attempts a Keychain-stored token after the page has already loaded.
+    // The token handed in at document-start is baked into a user script
+    // created once when the bridge was constructed, so it's stale for anyone
+    // who signed in later in the same session — which matters after a
+    // content-process crash reload, where relying on that constant would sign
+    // them straight back out. Native calls this with the *current* stored
+    // token instead.
+    restoreStoredToken: async function (token) {
+      requireMusic();
+      if (!token) return { authorized: false };
+      await restoreUserToken(token);
+      return { authorized: !!music.isAuthorized };
+    },
+
     // ---- Song relations (context menu: go to album / artist) ----
     //
     // Songs expose `albums` and `artists` relationships; this resolves both

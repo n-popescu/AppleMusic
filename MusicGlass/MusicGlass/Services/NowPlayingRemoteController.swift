@@ -106,7 +106,7 @@ final class NowPlayingRemoteController {
         // The notification closure is treated as @Sendable, and Notification
         // itself isn't Sendable — so the raw values are pulled out inside it
         // and only those cross onto the MainActor.
-        center.addObserver(
+        _ = center.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance(),
             queue: .main
@@ -118,7 +118,7 @@ final class NowPlayingRemoteController {
             }
         }
 
-        center.addObserver(
+        _ = center.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: AVAudioSession.sharedInstance(),
             queue: .main

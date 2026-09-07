@@ -234,7 +234,12 @@ final class MusicKitBridge: NSObject, ObservableObject {
 
     // MARK: - Bootstrapping
 
+    /// Reset per page load (including a reload after a content-process
+    /// crash) so the restore is retried for the new page but not looped.
+    private var hasAttemptedTokenRestoreThisLoad = false
+
     private func loadBridgePage() {
+        hasAttemptedTokenRestoreThisLoad = false
         guard let url = Bundle.main.url(forResource: "musickit-bridge", withExtension: "html"),
               let html = try? String(contentsOf: url, encoding: .utf8) else {
             lastError = "musickit-bridge.html is missing from the app bundle."
@@ -522,6 +527,18 @@ final class MusicKitBridge: NSObject, ObservableObject {
             "return await MusicGlassBridge.fetchAutoplayStation(\(Self.jsStringLiteral(songID)));"
         )
         return result.station
+    }
+
+    /// Hands the page the token currently in the Keychain. See the JS side:
+    /// the document-start injection is captured once at construction and is
+    /// stale for a session where the person signed in afterwards.
+    @discardableResult
+    func restoreStoredToken(_ token: String) async throws -> Bool {
+        struct Result: Decodable { let authorized: Bool }
+        let result: Result = try await call(
+            "return await MusicGlassBridge.restoreStoredToken(\(Self.jsStringLiteral(token)));"
+        )
+        return result.authorized
     }
 
     /// The song's album and primary artist, for the long-press menu. Either
@@ -819,6 +836,14 @@ extension MusicKitBridge: WKScriptMessageHandler {
 
         case "authorizationStatusDidChange":
             isAuthorized = (body["isAuthorized"] as? Bool) ?? false
+            // If the page came up signed out but we still hold a token, hand
+            // it the *current* one. Once per page load, so a genuinely
+            // revoked token can't spin here.
+            if !isAuthorized, !hasAttemptedTokenRestoreThisLoad,
+               let stored = Self.loadStoredUserToken(), !stored.isEmpty {
+                hasAttemptedTokenRestoreThisLoad = true
+                Task { try? await self.restoreStoredToken(stored) }
+            }
 
         case "userTokenDidChange":
             // Mirrors the music-user-token into the Keychain so a future
