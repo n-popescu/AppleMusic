@@ -1063,7 +1063,19 @@
       //    no rebuild at all: nothing restarts, nothing reshuffles, playback
       //    is not touched. Whether that holds is build-dependent, so it's
       //    attempted and then verified rather than assumed.
-      const candidates = [q.items, q._queueItems].filter(a => Array.isArray(a));
+      //
+      //    Only safe when the move stays entirely on one side of the
+      //    currently-playing index. `position` is MusicKit's own integer
+      //    index into this array and splicing does not update it, so a move
+      //    that crosses the current track would leave `position` pointing at
+      //    a *different song* — right queue order, wrong idea of what's
+      //    playing and what comes next. Those go to the rebuild below, which
+      //    sets the position explicitly via startWith.
+      const pos = (typeof q.position === 'number') ? q.position : -1;
+      const crossesCurrent = pos >= 0 && (
+        (from <= pos && target >= pos) || (from >= pos && target <= pos)
+      );
+      const candidates = crossesCurrent ? [] : [q.items, q._queueItems].filter(a => Array.isArray(a));
       for (const arr of candidates) {
         try {
           const [item] = arr.splice(from, 1);
