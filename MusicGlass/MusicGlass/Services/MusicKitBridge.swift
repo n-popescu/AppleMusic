@@ -128,7 +128,6 @@ final class MusicKitBridge: NSObject, ObservableObject {
     /// mounted (e.g. via `.background(bridge.webViewContainer)`), just invisible.
     let webView: WKWebView
 
-    private var readyContinuations: [CheckedContinuation<Void, Never>] = []
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -251,11 +250,23 @@ final class MusicKitBridge: NSObject, ObservableObject {
         webView.loadHTMLString(html, baseURL: URL(string: "https://music.apple.com"))
     }
 
-    func waitUntilReady() async {
-        if isReady { return }
-        await withCheckedContinuation { continuation in
-            readyContinuations.append(continuation)
+    /// Waits for the JS engine to finish configuring, giving up after
+    /// `timeout`. Returns whether it actually became ready.
+    ///
+    /// This used to park on a continuation with no timeout at all, so if the
+    /// page never got to `ready` — no network at launch, the MusicKit script
+    /// CDN unreachable, a content-process crash during load — every caller
+    /// awaiting it hung forever and the Library tab span indefinitely with no
+    /// error and no way to retry. Polling a published flag is less elegant
+    /// than a continuation but can't hang and can't double-resume.
+    @discardableResult
+    func waitUntilReady(timeout: TimeInterval = 20) async -> Bool {
+        if isReady { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while !isReady, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
+        return isReady
     }
 
     // MARK: - Auth
@@ -719,6 +730,38 @@ extension MusicKitBridge: WKNavigationDelegate {
         // The page itself calls back into `musicKitEvent` with `bridgeReady`
         // once MusicKit JS has configured and (if a stored token exists) restored auth.
     }
+
+    /// iOS jetsams a WKWebView's *web content process* under memory pressure
+    /// — routinely, and especially while the app is backgrounded. When that
+    /// happens here the entire MusicKit JS engine goes with it: playback
+    /// stops, every piece of page state is gone, and the view is left blank.
+    ///
+    /// Nothing was handling this. `isReady` stayed true, so the app went on
+    /// believing it had a working engine and every subsequent bridge call
+    /// failed with an opaque JavaScript error, with no path back short of
+    /// force-quitting the app. Reloading the page rebuilds the engine, and
+    /// the Keychain-stored user token means the session is restored with it.
+    @MainActor func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard webView === self.webView else { return }
+
+        isReady = false
+        playbackStatus = .none
+        nowPlaying = .empty
+        currentTime = 0
+        duration = 0
+        lastError = "The Apple Music engine was reclaimed by the system and is restarting."
+
+        loadBridgePage()
+    }
+
+    @MainActor func webView(_ webView: WKWebView,
+                             didFailProvisionalNavigation navigation: WKNavigation!,
+                             withError error: Error) {
+        // Only the engine page matters here; a failed navigation inside the
+        // sign-in popup is Apple's own page and surfaces there.
+        guard webView === self.webView else { return }
+        lastError = "Couldn't load the Apple Music engine: \(error.localizedDescription)"
+    }
 }
 
 // MARK: - WKUIDelegate (surfaces the sign-in popup only)
@@ -773,8 +816,6 @@ extension MusicKitBridge: WKScriptMessageHandler {
             // forever, including right after a sign-in that actually worked
             // (dismissAuthPopup() reloads the bridge, which re-fires this).
             lastError = nil
-            readyContinuations.forEach { $0.resume() }
-            readyContinuations.removeAll()
 
         case "authorizationStatusDidChange":
             isAuthorized = (body["isAuthorized"] as? Bool) ?? false

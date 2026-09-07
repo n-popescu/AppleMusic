@@ -349,7 +349,14 @@ final class MusicLibraryStore: ObservableObject {
         // the session. Waiting for ready first, then checking isAuthorized,
         // means that check reflects the real current state instead of a
         // startup race.
-        await bridge.waitUntilReady()
+        guard await bridge.waitUntilReady() else {
+            // Distinguishable from "signed out" and from "empty library",
+            // both of which LibraryView otherwise renders identically to a
+            // never-started engine.
+            errorMessage = "The Apple Music engine didn't start. Check your connection and pull to refresh."
+            hasLoadedLibraryOnce = true
+            return
+        }
         guard bridge.isAuthorized else { return }
         if !force, let cachedAt = libraryCachedAt, Date().timeIntervalSince(cachedAt) < Self.libraryCacheMaxAge {
             hasLoadedLibraryOnce = true
@@ -679,7 +686,12 @@ final class MusicLibraryStore: ObservableObject {
         errorMessage = nil
         do {
             let playlist = try await bridge.createPlaylist(name: name, description: description, trackIds: trackIds, isLibrary: isLibraryTracks)
-            await refreshLibrary()
+            // Must be forced. A plain refreshLibrary() is a no-op while the
+            // disk cache is still inside its 6-hour window, so the playlist
+            // that was just created would not appear in the Library tab until
+            // that expired — the one moment the cache is guaranteed stale is
+            // immediately after we changed the library ourselves.
+            await refreshLibrary(force: true)
             return playlist
         } catch {
             errorMessage = error.localizedDescription
@@ -706,7 +718,36 @@ final class MusicLibraryStore: ObservableObject {
 
     // MARK: - Discovery
 
-    func refreshDiscover() async {
+    /// Discover/Home content is fetched fresh on every tab appearance, and
+    /// both Home and Radio drive it from their own `.task`. Without a window
+    /// that meant three network calls per tab switch, and — worse — two
+    /// concurrent runs whose shared `isLoadingDiscover` flag the first one to
+    /// finish would clear, hiding the spinner while the other was still in
+    /// flight. Pull-to-refresh passes `force: true` and always refetches.
+    private var discoverLoadedAt: Date?
+    private var discoverRefreshTask: Task<Void, Never>?
+    private static let discoverCacheMaxAge: TimeInterval = 30 * 60
+
+    func refreshDiscover(force: Bool = false) async {
+        // Coalesce: a second caller joins the run already in flight rather
+        // than starting its own.
+        if let existing = discoverRefreshTask {
+            await existing.value
+            if !force { return }
+        }
+        if !force,
+           let loadedAt = discoverLoadedAt,
+           Date().timeIntervalSince(loadedAt) < Self.discoverCacheMaxAge,
+           !(recommendations.isEmpty && charts.songs.isEmpty && stations.isEmpty) {
+            return
+        }
+        let task = Task { await self.performDiscoverRefresh() }
+        discoverRefreshTask = task
+        await task.value
+        discoverRefreshTask = nil
+    }
+
+    private func performDiscoverRefresh() async {
         // `isAuthorized` starts false and only becomes meaningful once the
         // bridge is actually ready (see refreshLibrary()'s comment for the
         // same race in more detail) — checking it *before* waiting for ready
@@ -715,7 +756,10 @@ final class MusicLibraryStore: ObservableObject {
         // and return, with nothing left to ever retry since `.task` only
         // runs once per view lifetime. Waiting for ready first makes the
         // check below reflect the real current state.
-        await bridge.waitUntilReady()
+        guard await bridge.waitUntilReady() else {
+            stationsError = "The Apple Music engine didn't start. Check your connection and pull to refresh."
+            return
+        }
 
         // Matches the empty state's own copy ("Sign in to see recommendations"):
         // don't call into the bridge at all when signed out, full stop. This
@@ -750,6 +794,8 @@ final class MusicLibraryStore: ObservableObject {
         } catch {
             stationsError = error.localizedDescription
         }
+
+        discoverLoadedAt = Date()
     }
 
     // MARK: - Search hints

@@ -25,6 +25,20 @@ final class NowPlayingRemoteController {
     private var cachedArtworkImage: UIImage?
     private var artworkLoadTask: Task<Void, Never>?
 
+    /// What was last pushed to MPNowPlayingInfoCenter, so a tick that changes
+    /// nothing meaningful can be skipped entirely.
+    private struct PushedState: Equatable {
+        var title: String
+        var artistName: String
+        var albumName: String
+        var artworkURL: String?
+        var isPlaying: Bool
+        var duration: Double
+    }
+    private var lastPushed: PushedState?
+    private var lastPushedTime: Double = 0
+    private var lastPushedAt: Date = .distantPast
+
     /// The running Live Activity, if any. Typed `Any` (rather than
     /// `Activity<MusicGlassActivityAttributes>`) so this property itself
     /// doesn't need an `@available` annotation, which Swift doesn't allow on
@@ -81,8 +95,32 @@ final class NowPlayingRemoteController {
     private func updateNowPlayingInfo(nowPlaying: NowPlayingInfo, status: PlaybackStatus, currentTime: Double, duration: Double) {
         guard !nowPlaying.title.isEmpty else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            lastPushed = nil
             return
         }
+
+        let state = PushedState(
+            title: nowPlaying.title,
+            artistName: nowPlaying.artistName,
+            albumName: nowPlaying.albumName,
+            artworkURL: nowPlaying.artworkURL,
+            isPlaying: status.isPlaying,
+            duration: max(duration, 0)
+        )
+
+        // This is driven by a combineLatest that includes `currentTime`, which
+        // the bridge now polls four times a second — so without this guard the
+        // whole info dictionary (and an MPMediaItemArtwork closure) would be
+        // rebuilt and pushed to the system 4x/sec for a value the system is
+        // perfectly capable of extrapolating itself from elapsed time plus
+        // playback rate. Push only when something the system can't infer has
+        // actually changed: the track, the play/pause state, the duration, or
+        // a seek — detected as elapsed time diverging from where free-running
+        // playback would have put it.
+        let wallClockElapsed = Date().timeIntervalSince(lastPushedAt)
+        let projected = lastPushedTime + (state.isPlaying ? wallClockElapsed : 0)
+        let seeked = abs(currentTime - projected) > 2.0
+        guard state != lastPushed || seeked else { return }
 
         // WebKit runs its own media-remote integration for the <audio>
         // element MusicKit JS drives, and it configures the *shared*
@@ -91,24 +129,27 @@ final class NowPlayingRemoteController {
         // which is what put "skip 10 seconds" buttons on the Lock Screen in
         // place of real track controls. Our own setup only ran once at
         // launch, before any playback existed, so WebKit's always won.
-        // Re-asserting it here (on every now-playing/state change, i.e.
-        // right after WebKit has done its thing) reclaims the command
-        // center each time.
+        // Re-asserting it here (right after WebKit has done its thing)
+        // reclaims the command center.
         applyCommandEnablement()
+
+        // A station has no duration; saying so stops the Lock Screen from
+        // drawing a scrubber that sits at 0:00 forever.
+        let isLive = state.duration <= 0
 
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: nowPlaying.title,
             MPMediaItemPropertyArtist: nowPlaying.artistName,
             MPMediaItemPropertyAlbumTitle: nowPlaying.albumName,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
-            MPMediaItemPropertyPlaybackDuration: max(duration, 0),
+            MPMediaItemPropertyPlaybackDuration: state.duration,
             MPNowPlayingInfoPropertyPlaybackRate: status.isPlaying ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
             // Declares this as music rather than letting the system infer a
             // generic/video-ish type from the underlying web media element,
             // which also influences which transport controls it offers.
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
-            MPNowPlayingInfoPropertyIsLiveStream: false
+            MPNowPlayingInfoPropertyIsLiveStream: isLive
         ]
 
         if cachedArtworkURLString == nowPlaying.artworkURL, let image = cachedArtworkImage {
@@ -116,6 +157,10 @@ final class NowPlayingRemoteController {
         }
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+
+        lastPushed = state
+        lastPushedTime = currentTime
+        lastPushedAt = Date()
 
         if cachedArtworkURLString != nowPlaying.artworkURL {
             loadArtwork(urlString: nowPlaying.artworkURL)

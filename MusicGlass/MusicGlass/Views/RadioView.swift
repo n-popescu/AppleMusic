@@ -47,7 +47,7 @@ struct RadioView: View {
             .scrollIndicators(.hidden)
             .auroraBackground(accent: accent.color)
             .navigationBarTitleDisplayMode(.inline)
-            .refreshable { await store.refreshDiscover() }
+            .refreshable { await store.refreshDiscover(force: true) }
             .task { await store.refreshDiscover() }
             .task(id: store.stations.first?.id) {
                 await accent.load(from: store.stations.first?.artwork)
@@ -75,7 +75,7 @@ struct RadioView: View {
                 title: "Couldn't load stations",
                 message: error,
                 actionTitle: "Retry",
-                action: { Task { await store.refreshDiscover() } }
+                action: { Task { await store.refreshDiscover(force: true) } }
             )
         } else {
             EmptyStateView(

@@ -52,7 +52,7 @@ struct HomeView: View {
                 ToolbarItem(placement: .principal) { Color.clear }
             }
             .refreshable {
-                await store.refreshDiscover()
+                await store.refreshDiscover(force: true)
                 await store.refreshRecentlyPlayedHistory()
             }
             .task {
