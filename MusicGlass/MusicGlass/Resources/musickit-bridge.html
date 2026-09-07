@@ -479,8 +479,24 @@
         // the resulting descriptor had no key `setQueue` understood at all.
         descriptor[kind] = id;
       }
+      // `startPlaying: true` makes setQueue begin playback as part of
+      // building the queue instead of as a second, separately-awaited step.
+      // The old `setQueue(...)` then `play()` pair meant two sequential
+      // round trips: MusicKit resolves the descriptor against
+      // api.music.apple.com, and only once that has fully settled does
+      // play() start fetching the stream manifest and licence. Folding them
+      // together lets MusicKit overlap that work, which is the single
+      // biggest win available on tap-to-first-audio from this side of the
+      // bridge. (`autoplay` is the deprecated v2 spelling; `startPlaying` is
+      // the v3 one.)
+      descriptor.startPlaying = true;
       await m.setQueue(descriptor);
-      await m.play();
+
+      // Belt and braces: if this MusicKit build ignored startPlaying, we'd
+      // otherwise silently end up with a queue set and nothing playing.
+      if (!(m.isPlaying === true || m.playbackState === 2)) {
+        try { await m.play(); } catch (e) {}
+      }
     },
 
     // ---- Shuffle / Repeat / Volume ----
@@ -721,6 +737,34 @@
         seen[st.id] = true;
         return true;
       });
+    },
+
+    // ---- Song relations (context menu: go to album / artist) ----
+    //
+    // Songs expose `albums` and `artists` relationships; this resolves both
+    // in one bridge round trip so a long-press menu doesn't need two.
+    // Everything is individually try/caught and the result is always an
+    // object, because a library-only song's id isn't in the catalog id space
+    // and will legitimately 404 here.
+    fetchSongRelations: async function (songId) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+      let album = null;
+      let artist = null;
+
+      try {
+        const res = await m.api.music(`/v1/catalog/${storefront}/songs/${songId}/albums`, { limit: 1 });
+        const data = (res && res.data && res.data.data) || [];
+        if (data.length) album = mapAlbumAttributes(data[0].id, data[0].attributes || {}, false);
+      } catch (e) {}
+
+      try {
+        const res = await m.api.music(`/v1/catalog/${storefront}/songs/${songId}/artists`, { limit: 1 });
+        const data = (res && res.data && res.data.data) || [];
+        if (data.length) artist = mapArtistAttributes(data[0].id, data[0].attributes || {});
+      } catch (e) {}
+
+      return { album: album, artist: artist };
     },
 
     // ---- Autoplay seed ----

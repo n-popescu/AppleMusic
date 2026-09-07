@@ -38,6 +38,19 @@ struct ArtworkImage: View {
     }
 }
 
+/// What a long-press "Go to…" action opens.
+enum RelatedDestination: Identifiable {
+    case album(Album)
+    case artist(Artist)
+
+    var id: String {
+        switch self {
+        case .album(let album): return "album-" + album.id
+        case .artist(let artist): return "artist-" + artist.id
+        }
+    }
+}
+
 struct SongRow: View {
     @EnvironmentObject var store: MusicLibraryStore
     let song: Song
@@ -45,6 +58,12 @@ struct SongRow: View {
     let onTap: () -> Void
 
     @State private var showAddToPlaylistSheet = false
+    // Long-press navigation is presented as a sheet rather than pushed:
+    // SongRow appears inside five different NavigationStacks (Library, Search,
+    // Home, playlist and album detail), and a sheet works identically from all
+    // of them without plumbing a navigation path through each one.
+    @State private var relatedDestination: RelatedDestination?
+    @State private var isResolvingRelations = false
 
     var body: some View {
         Button(action: onTap) {
@@ -108,6 +127,50 @@ struct SongRow: View {
             AddToPlaylistSheet(song: song)
                 .environmentObject(store)
         }
+        .sheet(item: $relatedDestination) { destination in
+            NavigationStack {
+                Group {
+                    switch destination {
+                    case .album(let album):
+                        AlbumDetailView(album: album)
+                    case .artist(let artist):
+                        ArtistDetailView(artist: artist)
+                    }
+                }
+                // ArtistDetailView deliberately doesn't register this itself
+                // (SearchView's stack already does, and registering the same
+                // type twice in one stack is ambiguous) — but this sheet is
+                // its own stack, so without it the artist's album tiles would
+                // be dead links.
+                .navigationDestination(for: Album.self) { AlbumDetailView(album: $0) }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { relatedDestination = nil }
+                    }
+                }
+            }
+            .environmentObject(store)
+        }
+    }
+
+    /// Resolves the song's album/artist on demand. Doing it lazily (rather
+    /// than prefetching for every visible row) keeps a long list from firing
+    /// a request per row just in case someone long-presses it.
+    private enum Relation { case album, artist }
+
+    private func openRelation(_ relation: Relation) {
+        guard !isResolvingRelations else { return }
+        isResolvingRelations = true
+        Task {
+            defer { isResolvingRelations = false }
+            guard let relations = await store.relations(forSong: song) else { return }
+            switch relation {
+            case .album:
+                relatedDestination = relations.album.map(RelatedDestination.album)
+            case .artist:
+                relatedDestination = relations.artist.map(RelatedDestination.artist)
+            }
+        }
     }
 
     @ViewBuilder
@@ -121,6 +184,22 @@ struct SongRow: View {
             Task { await store.playLater(song: song) }
         } label: {
             Label("Play Later", systemImage: "text.line.last.and.arrowtriangle.forward")
+        }
+        Divider()
+        Button {
+            Task { await store.startStation(forSong: song) }
+        } label: {
+            Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
+        }
+        Button {
+            openRelation(.album)
+        } label: {
+            Label("Go to Album", systemImage: "square.stack")
+        }
+        Button {
+            openRelation(.artist)
+        } label: {
+            Label("Go to Artist", systemImage: "music.mic")
         }
         Divider()
         if let kind = song.playParams?.kind {

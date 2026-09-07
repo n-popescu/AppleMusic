@@ -509,6 +509,17 @@ final class MusicKitBridge: NSObject, ObservableObject {
         return result.station
     }
 
+    /// The song's album and primary artist, for the long-press menu. Either
+    /// side can be nil (a library-only id isn't in the catalog id space).
+    func fetchSongRelations(songID: String) async throws -> SongRelations {
+        try await call("return await MusicGlassBridge.fetchSongRelations(\(Self.jsStringLiteral(songID)));")
+    }
+
+    struct SongRelations: Decodable {
+        let album: Album?
+        let artist: Artist?
+    }
+
     /// Wrapper so "no station for this song" comes back as a decodable
     /// object rather than a bare top-level null, which `call<T>` rejects.
     private struct AutoplayStationResult: Decodable {

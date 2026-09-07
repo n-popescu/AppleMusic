@@ -563,6 +563,28 @@ final class MusicLibraryStore: ObservableObject {
         }
     }
 
+    /// Starts Apple's personalised radio station seeded from this song — the
+    /// same thing "Create Station" does in the native Music app. Reuses the
+    /// exact resolution chain Autoplay uses (song's station, then the
+    /// artist's), so the two features can't drift apart.
+    func startStation(forSong song: Song) async {
+        errorMessage = nil
+        await performPlayback(id: song.id) {
+            guard let station = try await self.bridge.fetchAutoplayStation(songID: song.id),
+                  let params = station.playParams else {
+                throw MusicKitBridgeError.javascriptError(
+                    "Apple Music has no station for \u{201c}\(song.title)\u{201d}."
+                )
+            }
+            try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false)
+        }
+    }
+
+    /// The song's album and primary artist, for the long-press menu.
+    func relations(forSong song: Song) async -> MusicKitBridge.SongRelations? {
+        try? await bridge.fetchSongRelations(songID: song.id)
+    }
+
     func play(album: Album) async {
         guard let params = album.playParams else { return }
         await performPlayback(id: album.id) {
