@@ -1,16 +1,74 @@
 import SwiftUI
+import UIKit
+
+/// In-memory artwork cache sitting in front of the URL loading system.
+///
+/// `AsyncImage` restarts its load whenever SwiftUI recreates the view, which a
+/// LazyVGrid/LazyVStack does constantly as cells recycle. Even with a warm
+/// URLCache that means every scroll flashes the placeholder back in before the
+/// decoded image reappears. Holding the decoded `UIImage` here makes a
+/// revisited cell paint immediately.
+@MainActor
+final class ArtworkImageCache {
+    static let shared = ArtworkImageCache()
+
+    private let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 400
+        // Roughly 64MB of decoded pixels; NSCache evicts under memory
+        // pressure regardless, this just stops it growing unboundedly first.
+        cache.totalCostLimit = 64 * 1024 * 1024
+        return cache
+    }()
+
+    /// De-duplicates concurrent loads of the same URL, so a grid showing the
+    /// same artwork in several cells fetches it once.
+    private var inFlight: [URL: Task<UIImage?, Never>] = [:]
+
+    func cached(_ url: URL) -> UIImage? {
+        cache.object(forKey: url.absoluteString as NSString)
+    }
+
+    func load(_ url: URL) async -> UIImage? {
+        if let hit = cached(url) { return hit }
+
+        if let existing = inFlight[url] { return await existing.value }
+
+        let task = Task<UIImage?, Never> {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else { return nil }
+            return image
+        }
+        inFlight[url] = task
+        let image = await task.value
+        inFlight[url] = nil
+
+        if let image {
+            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            cache.setObject(image, forKey: url.absoluteString as NSString, cost: cost)
+        }
+        return image
+    }
+}
 
 struct ArtworkImage: View {
     let artwork: Artwork?
     var size: CGFloat = 52
     var cornerRadius: CGFloat = 10
 
+    @State private var image: UIImage?
+
+    private var url: URL? {
+        artwork?.resolvedURL(size: Int(size * 3))
+    }
+
     var body: some View {
-        AsyncImage(url: artwork?.resolvedURL(size: Int(size * 3))) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().aspectRatio(contentMode: .fill)
-            default:
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
                 // Placeholder picks up the brand gradient rather than a flat
                 // grey square, so a wall of not-yet-loaded artwork still
                 // looks intentional while it fills in.
@@ -34,6 +92,24 @@ struct ArtworkImage: View {
         .overlay {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+        }
+        .task(id: url) {
+            guard let url else {
+                image = nil
+                return
+            }
+            // Synchronous cache hit: paint in the same frame, no placeholder
+            // flash at all on a recycled cell.
+            if let hit = ArtworkImageCache.shared.cached(url) {
+                image = hit
+                return
+            }
+            image = nil
+            let loaded = await ArtworkImageCache.shared.load(url)
+            // The cell may have been recycled onto a different item while
+            // this was in flight.
+            guard url == self.url else { return }
+            image = loaded
         }
     }
 }
