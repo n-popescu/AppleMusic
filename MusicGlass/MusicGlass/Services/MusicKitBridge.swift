@@ -499,6 +499,13 @@ final class MusicKitBridge: NSObject, ObservableObject {
         try await callVoid("await MusicGlassBridge.moveQueueItem(\(from), \(to));")
     }
 
+    /// Removes one item from the live queue. Uses `MusicKit.Queue.remove(index)`
+    /// where the running MusicKit JS build has it (no rebuild, no interruption),
+    /// falling back to a queue rebuild otherwise — see the JS side.
+    func removeQueueItem(at index: Int) async throws {
+        try await callVoid("await MusicGlassBridge.removeQueueItem(\(index));")
+    }
+
     private static func jsStringLiteral(_ value: String) -> String {
         guard let data = try? JSONEncoder().encode(value),
               let json = String(data: data, encoding: .utf8) else { return "\"\"" }

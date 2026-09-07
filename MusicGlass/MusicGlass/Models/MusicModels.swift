@@ -8,6 +8,16 @@ struct Artwork: Codable, Hashable {
     let url: String // template with {w} and {h} placeholders
 
     /// Resolves the Apple Music artwork URL template to a concrete size.
+    /// Non-square resolve. Live radio artwork is a 4:1 banner (4320x1080 in
+    /// Apple's own sample), so forcing it through the square helper below
+    /// crops the station's name straight off the image.
+    func resolvedURL(width: Int, height: Int) -> URL? {
+        let resolved = url
+            .replacingOccurrences(of: "{w}", with: "\(width)")
+            .replacingOccurrences(of: "{h}", with: "\(height)")
+        return URL(string: resolved)
+    }
+
     func resolvedURL(size: Int) -> URL? {
         let resolved = url
             .replacingOccurrences(of: "{w}", with: "\(size)")
@@ -232,6 +242,9 @@ struct Station: Codable, Identifiable, Hashable {
     let name: String
     let artwork: Artwork?
     let isLive: Bool?
+    /// Apple's editorial one-liner ("The new music that matters."), when the
+    /// station has one. Optional so older cached payloads still decode.
+    var tagline: String?
     let playParams: PlayParams?
 }
 

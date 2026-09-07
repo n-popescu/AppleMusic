@@ -47,6 +47,11 @@ final class MusicLibraryStore: ObservableObject {
     @Published var recommendations: [RecommendationItem] = []
     @Published var charts: ChartsResult = .init()
     @Published var stations: [Station] = []
+    /// Kept separate from `errorMessage` so a stations failure can be shown on
+    /// the Radio tab itself. This used to be swallowed by a bare `catch`, which
+    /// is why an endpoint that failed on every single call still presented as
+    /// a merely empty screen.
+    @Published var stationsError: String?
     @Published var isLoadingDiscover = false
 
     // MARK: - Autoplay
@@ -672,6 +677,7 @@ final class MusicLibraryStore: ObservableObject {
             recommendations = []
             charts = .init()
             stations = []
+            stationsError = nil
             return
         }
 
@@ -690,7 +696,10 @@ final class MusicLibraryStore: ObservableObject {
         } catch { /* ditto */ }
         do {
             stations = try await stationsResult
-        } catch { /* ditto */ }
+            stationsError = nil
+        } catch {
+            stationsError = error.localizedDescription
+        }
     }
 
     // MARK: - Search hints
@@ -747,25 +756,84 @@ final class MusicLibraryStore: ObservableObject {
 
     func moveQueueItem(from source: IndexSet, to destination: Int) async {
         guard let from = source.first else { return }
-        // Optimistically reorder locally so the UI feels instant, then ask
-        // the bridge to make it real and reconcile with the authoritative state.
         var items = queue.items
         guard items.indices.contains(from) else { return }
         let adjustedDestination = destination > from ? destination - 1 : destination
-        let moved = items.remove(at: from)
-        items.insert(moved, at: min(max(adjustedDestination, 0), items.count))
-        queue.items = items
+        let target = min(max(adjustedDestination, 0), items.count - 1)
+        guard target != from else { return }
 
+        // Optimistically reorder locally so the drag lands where the finger
+        // let go instead of snapping back while the bridge works.
+        let moved = items.remove(at: from)
+        items.insert(moved, at: target)
+        queue.items = items
+        // Keep the "now playing" marker pointing at the same track rather
+        // than at whatever ends up at the old index.
+        queue.position = Self.positionAfterMove(queue.position, from: from, to: target)
+
+        errorMessage = nil
         do {
-            try await bridge.moveQueueItem(from: from, to: adjustedDestination)
-            await refreshQueue()
+            try await bridge.moveQueueItem(from: from, to: target)
+            // Rebuilding the queue in MusicKit JS is asynchronous on its side:
+            // reading it back immediately returns the pre-move array and makes
+            // a move that actually worked look like it silently reverted.
+            await reconcileQueue(expecting: items.map(\.id))
         } catch {
+            let message = error.localizedDescription
             // refreshQueue() clears errorMessage on entry (see its own
             // comment), so it must run — reconciling the optimistic local
             // reorder against the bridge's real state — before setting the
             // message below, not after, or this would immediately wipe it.
             await refreshQueue()
-            errorMessage = error.localizedDescription
+            errorMessage = message
         }
+    }
+
+    func removeQueueItem(at index: Int) async {
+        var items = queue.items
+        guard items.indices.contains(index) else { return }
+        items.remove(at: index)
+        queue.items = items
+        if queue.position > index { queue.position -= 1 }
+
+        errorMessage = nil
+        do {
+            try await bridge.removeQueueItem(at: index)
+            await reconcileQueue(expecting: items.map(\.id))
+        } catch {
+            let message = error.localizedDescription
+            await refreshQueue()
+            errorMessage = message
+        }
+    }
+
+    /// Re-reads the queue until it matches what we just asked for, then adopts
+    /// the bridge's authoritative copy. A single immediate read races MusicKit
+    /// JS's own queue rebuild and would clobber a successful edit with the
+    /// stale pre-edit order — which is exactly what made reordering look like
+    /// it did nothing.
+    private func reconcileQueue(expecting expectedIDs: [String]) async {
+        for attempt in 0..<6 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            guard let snapshot = try? await bridge.fetchQueue() else { continue }
+            if snapshot.items.map(\.id) == expectedIDs {
+                queue = snapshot
+                return
+            }
+        }
+        // Never converged: the edit didn't take on MusicKit's side, so show
+        // the real queue rather than leaving a local fiction on screen.
+        await refreshQueue()
+    }
+
+    /// Where the currently-playing index lands after moving one row.
+    static func positionAfterMove(_ position: Int, from: Int, to: Int) -> Int {
+        guard position >= 0 else { return position }
+        if position == from { return to }
+        if from < position && to >= position { return position - 1 }
+        if from > position && to <= position { return position + 1 }
+        return position
     }
 }

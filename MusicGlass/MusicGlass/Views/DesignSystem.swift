@@ -414,3 +414,68 @@ struct DetailHeader: View {
         .padding(.top, 8)
     }
 }
+
+// MARK: - Scrubber
+
+/// Apple-Music-style progress bar: a slim capsule that thickens while you drag
+/// it. A plain `Slider` with a visible knob reads as a settings control here;
+/// this reads as playback.
+///
+/// Dragging is reported continuously through `value` but only committed on
+/// release via `onCommit`, so the underlying player isn't seeked on every
+/// pixel of movement.
+struct ScrubBar: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var accent: Color = Palette.accent
+    /// Mirrors `Slider`'s own callback: true when a drag starts, false when it
+    /// ends. Lets the caller show the dragged position in its own labels.
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    var onCommit: (Double) -> Void
+
+    @State private var isDragging = false
+    @State private var dragValue: Double = 0
+
+    private var span: Double { max(range.upperBound - range.lowerBound, 0.001) }
+
+    var body: some View {
+        let shown = isDragging ? dragValue : value
+        let fraction = min(max((shown - range.lowerBound) / span, 0), 1)
+        let height: CGFloat = isDragging ? 11 : 6
+
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.18))
+                Capsule()
+                    .fill(accent)
+                    .frame(width: max(proxy.size.width * fraction, 0))
+            }
+            .frame(height: height)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        if !isDragging {
+                            isDragging = true
+                            dragValue = shown
+                            onEditingChanged(true)
+                        }
+                        let ratio = min(max(gesture.location.x / proxy.size.width, 0), 1)
+                        dragValue = range.lowerBound + ratio * span
+                        value = dragValue
+                    }
+                    .onEnded { _ in
+                        let committed = dragValue
+                        isDragging = false
+                        value = committed
+                        onEditingChanged(false)
+                        onCommit(committed)
+                    }
+            )
+        }
+        .frame(height: 22)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isDragging)
+    }
+}

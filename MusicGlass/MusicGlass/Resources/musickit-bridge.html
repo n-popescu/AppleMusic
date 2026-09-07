@@ -184,6 +184,17 @@
     return 0;
   }
 
+  // Apple's own forum answer for removing a queue item reads the queue as
+  // `MusicKit.getInstance().player.queue`, while this file has always used
+  // `music.queue`. That's the identical `music` vs `music.player` split that
+  // made the progress bar look broken until currentPlaybackTime() above got a
+  // dual path, so the queue gets one too rather than betting on either.
+  function queueObject() {
+    if (music && music.queue && Array.isArray(music.queue.items)) return music.queue;
+    if (music && music.player && music.player.queue && Array.isArray(music.player.queue.items)) return music.player.queue;
+    return (music && music.queue) || (music && music.player && music.player.queue) || null;
+  }
+
   document.addEventListener('musickitloaded', async () => {
     try {
       await MusicKit.configure({
@@ -293,6 +304,7 @@
       name: a.name || '',
       artwork: a.artwork ? { width: a.artwork.width, height: a.artwork.height, url: a.artwork.url } : null,
       isLive: !!a.isLive,
+      tagline: (a.editorialNotes && (a.editorialNotes.tagline || a.editorialNotes.short)) || null,
       playParams: a.playParams
         ? { id: a.playParams.id, kind: a.playParams.kind || 'station', isLibrary: false }
         : { id: id, kind: 'station', isLibrary: false }
@@ -442,10 +454,15 @@
     setQueueAndPlay: async function (id, kind, isLibrary) {
       const m = requireMusic();
       const descriptor = {};
-      if (kind === 'station') {
+      if (kind === 'station' || kind === 'radioStation') {
         // MusicKit JS's SetQueueOptions takes a single station id under
         // `station` — stations always play from the catalog, never the
-        // library.
+        // library. Apple's own live radio stations report their playParams
+        // kind as `radioStation` rather than `station` (see the response
+        // sample in "Get the Apple Music Live Radio Stations"), so both
+        // spellings have to land on the same `station` key — otherwise
+        // tapping Apple Music 1 builds a `radioStation` key setQueue has
+        // never heard of and silently does nothing.
         descriptor.station = id;
       } else {
         // MusicKit JS's real SetQueueOptions type (verified against
@@ -666,12 +683,44 @@
       };
     },
 
+    // `/v1/catalog/{sf}/stations` is NOT a listing endpoint. It has exactly
+    // three valid modes — `ids=`, `filter[identity]=personal`, and
+    // `filter[featured]=apple-music-live-radio` — and this used to call it
+    // with neither, just `limit: 20`. That's a 4xx every single time, which
+    // refreshDiscover's per-section `catch` swallowed, so Radio was
+    // guaranteed to be empty and guaranteed to say nothing about why.
+    //
+    // Both real modes are fetched independently so one failing (a storefront
+    // with no live radio, a user with no personal station yet) still leaves
+    // the other showing.
     fetchStations: async function () {
       const m = requireMusic();
       const storefront = m.storefrontId || 'us';
-      const res = await m.api.music(`/v1/catalog/${storefront}/stations`, { limit: 20 });
-      const data = res.data.data || [];
-      return mapSafely(data, d => mapStationAttributes(d.id, d.attributes), 'station');
+      let live = [];
+      let personal = [];
+
+      try {
+        const res = await m.api.music(`/v1/catalog/${storefront}/stations`, {
+          'filter[featured]': 'apple-music-live-radio'
+        });
+        live = mapSafely(res.data.data || [], d => mapStationAttributes(d.id, d.attributes), 'live station');
+      } catch (e) {}
+
+      try {
+        const res = await m.api.music(`/v1/catalog/${storefront}/stations`, {
+          'filter[identity]': 'personal'
+        });
+        personal = mapSafely(res.data.data || [], d => mapStationAttributes(d.id, d.attributes), 'personal station');
+      } catch (e) {}
+
+      // De-duplicate: the personal station can also come back under featured
+      // in some storefronts.
+      const seen = {};
+      return live.concat(personal).filter(st => {
+        if (seen[st.id]) return false;
+        seen[st.id] = true;
+        return true;
+      });
     },
 
     // ---- Search hints/autocomplete ----
@@ -742,8 +791,8 @@
     // MusicKit JS keeps the live playback queue on `music.queue`. `.items` is
     // an array of MediaItem, `.position` is the index currently playing.
     fetchQueue: async function () {
-      const m = requireMusic();
-      const q = m.queue;
+      requireMusic();
+      const q = queueObject();
       const items = (q && q.items) ? q.items : [];
       return {
         position: (q && typeof q.position === 'number') ? q.position : -1,
@@ -758,35 +807,97 @@
       await m.changeToMediaAtIndex(index);
     },
 
-    // Best-effort reorder: MusicKit JS doesn't publish a first-class "move
-    // item in queue" API, so this rebuilds the queue from the current array
-    // with the item moved, then resumes at the same track. This can cause a
-    // brief playback hiccup.
+    // Rebuilding the queue is the only way to reorder it (MusicKit JS still
+    // publishes no "move item" API), and rebuilding stops playback — so
+    // capture where we are first and restore it afterwards, otherwise every
+    // reorder restarts the current track from 0:00.
+    //
+    // The old version passed `items.map(i => i.id)` — bare id strings. That is
+    // the same mistake as the fabricated `librarySong` descriptors fixed
+    // earlier: a bare string gives setQueue no way to know what kind of thing
+    // it is, so the call throws, the native side catches it and re-reads the
+    // untouched queue, and the row visibly snaps back. The MediaItem objects
+    // already in `q.items` are themselves valid descriptors and carry their
+    // own type, so they're passed through as-is.
     moveQueueItem: async function (from, to) {
       const m = requireMusic();
-      const q = m.queue;
-      if (!q || !q.items || from < 0 || from >= q.items.length) return;
+      const q = queueObject();
+      if (!q || !q.items || from < 0 || from >= q.items.length) return { moved: false };
+
       const items = q.items.slice();
       const [moved] = items.splice(from, 1);
       items.splice(Math.max(0, Math.min(to, items.length)), 0, moved);
 
-      const wasPlayingIndex = q.position;
-      const currentlyPlayingId = (wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
-        ? q.items[wasPlayingIndex].id
+      const wasPlayingIndex = (typeof q.position === 'number') ? q.position : -1;
+      const currentItem = (wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
+        ? q.items[wasPlayingIndex]
         : null;
+      const resumeAt = currentPlaybackTime();
+      const wasPlaying = m.isPlaying === true || m.playbackState === 2;
 
-      // Same descriptor-shape fix as insertIntoQueueFallback above: `items`
-      // takes plain id strings (or MediaItem instances), never `{id, kind}`
-      // objects.
-      await m.setQueue({ items: items.map(i => i.id) });
+      await m.setQueue({ items: items });
 
-      // Resume from wherever the previously-playing item ended up.
-      if (currentlyPlayingId) {
-        const newIndex = items.findIndex(i => i.id === currentlyPlayingId);
+      if (currentItem) {
+        const newIndex = items.findIndex(i => i.id === currentItem.id);
         if (newIndex >= 0) {
           await m.changeToMediaAtIndex(newIndex);
+          // Put the needle back where it was. Without this the reorder is
+          // technically correct and still feels broken, because the song
+          // you're listening to jumps back to the beginning.
+          if (resumeAt > 1) {
+            try { await m.seekToTime(resumeAt); } catch (e) {}
+          }
+          if (wasPlaying) {
+            try { await m.play(); } catch (e) {}
+          }
         }
       }
+      return { moved: true };
+    },
+
+    // `MusicKit.Queue.remove(index)` has existed since MusicKit JS build 129
+    // (per Apple's own forum answer). It mutates the live queue in place, so
+    // unlike a reorder there's no rebuild and no playback interruption at all
+    // — worth preferring even though the setQueue fallback below would also
+    // produce the right list.
+    removeQueueItem: async function (index) {
+      const m = requireMusic();
+      const q = queueObject();
+      if (!q || !q.items || index < 0 || index >= q.items.length) return { removed: false };
+
+      if (typeof q.remove === 'function') {
+        q.remove(index);
+        return { removed: true, viaNativeRemove: true };
+      }
+
+      // Older build: rebuild without the removed item, same descriptor rules
+      // (and the same resume handling) as moveQueueItem above.
+      const items = q.items.slice();
+      items.splice(index, 1);
+
+      const wasPlayingIndex = (typeof q.position === 'number') ? q.position : -1;
+      const removingCurrent = index === wasPlayingIndex;
+      const currentItem = (!removingCurrent && wasPlayingIndex >= 0 && wasPlayingIndex < q.items.length)
+        ? q.items[wasPlayingIndex]
+        : null;
+      const resumeAt = currentPlaybackTime();
+      const wasPlaying = m.isPlaying === true || m.playbackState === 2;
+
+      await m.setQueue({ items: items });
+
+      if (currentItem) {
+        const newIndex = items.findIndex(i => i.id === currentItem.id);
+        if (newIndex >= 0) {
+          await m.changeToMediaAtIndex(newIndex);
+          if (resumeAt > 1) {
+            try { await m.seekToTime(resumeAt); } catch (e) {}
+          }
+          if (wasPlaying) {
+            try { await m.play(); } catch (e) {}
+          }
+        }
+      }
+      return { removed: true, viaNativeRemove: false };
     },
 
     // ---- Search (catalog) ----

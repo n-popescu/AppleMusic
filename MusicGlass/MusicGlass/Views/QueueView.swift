@@ -15,7 +15,12 @@ struct QueueView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .environment(\.editMode, .constant(.active))
+            // The list used to be pinned in `.active` edit mode, which put a
+            // reorder grabber and a delete circle on every row permanently and
+            // — because UIKit suppresses swipe-to-delete while a table is
+            // editing — was the reason a row couldn't be swiped away at all.
+            // Out of edit mode, `.onDelete` gives real swipe-to-delete and
+            // `.onMove` still allows long-press drag to reorder.
             .auroraBackground()
             .navigationTitle("Queue")
             .navigationBarTitleDisplayMode(.inline)
@@ -59,15 +64,27 @@ struct QueueView: View {
                         }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 }
                 .onMove { source, destination in
                     Task { await store.moveQueueItem(from: source, to: destination) }
                 }
+                .onDelete { offsets in
+                    guard let index = offsets.first else { return }
+                    Task { await store.removeQueueItem(at: index) }
+                }
             }
         } header: {
-            Text("Up Next")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Palette.secondaryText)
+            HStack {
+                sectionLabel("Up Next")
+                Spacer()
+                if store.queue.items.count > 1 {
+                    Text("Swipe to remove · hold to reorder")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.tertiaryText)
+                        .textCase(nil)
+                }
+            }
         }
     }
 
@@ -85,9 +102,7 @@ struct QueueView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } header: {
-                Text("Recently Played")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.secondaryText)
+                sectionLabel("Recently Played")
             }
         } else if !store.recentlyPlayedHistory.isEmpty {
             Section {
@@ -95,12 +110,10 @@ struct QueueView: View {
                     recentlyPlayedRow(item)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .moveDisabled(true)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 }
             } header: {
-                Text("Recently Played")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.secondaryText)
+                sectionLabel("Recently Played")
             }
         }
     }
@@ -115,33 +128,37 @@ struct QueueView: View {
             Button {
                 Task { await store.play(album: album) }
             } label: {
-                HStack(spacing: 12) {
-                    ArtworkImage(artwork: album.artwork, size: 44, cornerRadius: 8)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(album.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.primaryText).lineLimit(1)
-                        Text(album.artistName).font(.system(size: 12)).foregroundStyle(Palette.secondaryText).lineLimit(1)
-                    }
-                    Spacer()
-                }
+                compactRow(artwork: album.artwork, title: album.title, subtitle: album.artistName)
             }
             .buttonStyle(.plain)
         } else if let playlist = item.playlist {
             Button {
                 Task { await store.play(playlist: playlist) }
             } label: {
-                HStack(spacing: 12) {
-                    ArtworkImage(artwork: playlist.artwork, size: 44, cornerRadius: 8)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(playlist.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.primaryText).lineLimit(1)
-                        if let curator = playlist.curatorName {
-                            Text(curator).font(.system(size: 12)).foregroundStyle(Palette.secondaryText).lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                }
+                compactRow(artwork: playlist.artwork, title: playlist.name, subtitle: playlist.curatorName)
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func compactRow(artwork: Artwork?, title: String, subtitle: String?) -> some View {
+        HStack(spacing: 12) {
+            ArtworkImage(artwork: artwork, size: 46, cornerRadius: 10)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Palette.primaryText)
+                    .lineLimit(1)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 
     /// Session-only list built locally by observing `nowPlaying` changes —
@@ -161,14 +178,19 @@ struct QueueView: View {
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-                    .moveDisabled(true)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 }
             } header: {
-                Text("This Session")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.secondaryText)
+                sectionLabel("This Session")
             }
         }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(Palette.secondaryText)
+            .textCase(nil)
     }
 }
 
@@ -178,11 +200,11 @@ private struct QueueRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ArtworkImage(artwork: item.artwork, size: 44, cornerRadius: 8)
+            ArtworkImage(artwork: item.artwork, size: 46, cornerRadius: 10)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14, weight: isCurrent ? .semibold : .medium))
                     .foregroundStyle(isCurrent ? Palette.accent : Palette.primaryText)
                     .lineLimit(1)
                 Text(item.artistName)
@@ -191,13 +213,25 @@ private struct QueueRow: View {
                     .lineLimit(1)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if isCurrent {
                 Image(systemName: "waveform")
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Palette.accent)
+            } else {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.tertiaryText)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Palette.accent.opacity(0.12))
+            }
+        }
     }
 }
