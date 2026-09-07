@@ -723,6 +723,59 @@
       });
     },
 
+    // ---- Autoplay seed ----
+    //
+    // Apple exposes a `station` relationship on both songs and artists
+    // (Songs.Relationships.SongsStationRelationship /
+    // ArtistsStationRelationship). That station is the same thing the native
+    // Music app creates from "Create Station" on a track: a personalised,
+    // endless stream seeded from that specific song, which is what actually
+    // continues in the same vein rather than jumping to whatever is charting.
+    //
+    // This replaces autoplay's old behaviour of grabbing a random top-100
+    // song, which had no relationship to what had just been playing.
+    //
+    // Returns null (not an error) whenever no station can be derived — a
+    // library-only track whose id isn't in the catalog id space, a storefront
+    // without one, an artist with no station — so the native side can fall
+    // back rather than surfacing a failure for something the person never
+    // explicitly asked for.
+    fetchAutoplayStation: async function (songId) {
+      const m = requireMusic();
+      const storefront = m.storefrontId || 'us';
+
+      async function stationFrom(path) {
+        try {
+          const res = await m.api.music(path, { limit: 1 });
+          const data = (res && res.data && res.data.data) || [];
+          if (!data.length) return null;
+          return mapStationAttributes(data[0].id, data[0].attributes || {});
+        } catch (e) {
+          return null;
+        }
+      }
+
+      // 1. The song's own station — the tightest match available.
+      const fromSong = await stationFrom(`/v1/catalog/${storefront}/songs/${songId}/station`);
+      if (fromSong) return { station: fromSong };
+
+      // 2. Failing that, the primary artist's station. Still far closer to
+      //    "more like this" than a chart.
+      try {
+        const artistsRes = await m.api.music(`/v1/catalog/${storefront}/songs/${songId}/artists`, { limit: 1 });
+        const artists = (artistsRes && artistsRes.data && artistsRes.data.data) || [];
+        if (artists.length) {
+          const fromArtist = await stationFrom(`/v1/catalog/${storefront}/artists/${artists[0].id}/station`);
+          if (fromArtist) return { station: fromArtist };
+        }
+      } catch (e) {}
+
+      // Always an object, never a bare null: `call<T>` on the native side
+      // rejects a top-level null outright (isValidJSONObject), which would
+      // turn "no station exists" into a decode error.
+      return { station: null };
+    },
+
     // ---- Search hints/autocomplete ----
     fetchSearchHints: async function (term) {
       const m = requireMusic();

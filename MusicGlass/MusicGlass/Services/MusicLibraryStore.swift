@@ -70,6 +70,11 @@ final class MusicLibraryStore: ObservableObject {
     // own shuffle/repeat state — it doesn't persist across a relaunch.
     @Published var isAutoplayEnabled = false
     private var isHandlingAutoplay = false
+    /// The last track that actually played, captured while it's still
+    /// current — by the time playbackStatus reports `.ended`, `nowPlaying`
+    /// can already be cleared, which would leave autoplay with nothing to
+    /// seed from.
+    private var lastAutoplaySeedID: String?
 
     // MARK: - Search hints
 
@@ -210,6 +215,12 @@ final class MusicLibraryStore: ObservableObject {
     /// queue, which just advances on its own) — the right moment for
     /// Autoplay to hand it something new.
     private func observeAutoplay() {
+        bridge.$nowPlaying
+            .compactMap(\.catalogID)
+            .removeDuplicates()
+            .sink { [weak self] id in self?.lastAutoplaySeedID = id }
+            .store(in: &cancellables)
+
         bridge.$playbackStatus
             .removeDuplicates()
             .sink { [weak self] status in
@@ -225,6 +236,23 @@ final class MusicLibraryStore: ObservableObject {
         isHandlingAutoplay = true
         defer { isHandlingAutoplay = false }
 
+        // Best case by a wide margin: Apple's own station seeded from the
+        // track that just finished. That's the same personalised, endless
+        // stream the native Music app builds from "Create Station", so it
+        // continues in the mood you were already in instead of jumping to
+        // whatever happens to be charting — which is all this used to do.
+        if let seedID = lastAutoplaySeedID,
+           let station = try? await bridge.fetchAutoplayStation(songID: seedID),
+           let params = station.playParams {
+            await performPlayback(id: station.id) {
+                try await self.bridge.setQueueAndPlay(id: params.id, kind: params.kind, isLibrary: false)
+            }
+            return
+        }
+
+        // No station could be derived (a library-only track, a storefront
+        // without one). Fall back to the old behaviour rather than stopping
+        // dead: something related-ish beats silence.
         if charts.songs.isEmpty && recommendations.isEmpty {
             await refreshDiscover()
         }

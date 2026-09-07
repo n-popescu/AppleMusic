@@ -499,6 +499,22 @@ final class MusicKitBridge: NSObject, ObservableObject {
         try await callVoid("await MusicGlassBridge.moveQueueItem(\(from), \(to));")
     }
 
+    /// The station Apple derives from a specific song (falling back to the
+    /// song's artist) — the seed used for Autoplay. `nil` when no station
+    /// exists for it; see the JS side for why that isn't an error.
+    func fetchAutoplayStation(songID: String) async throws -> Station? {
+        let result: AutoplayStationResult = try await call(
+            "return await MusicGlassBridge.fetchAutoplayStation(\(Self.jsStringLiteral(songID)));"
+        )
+        return result.station
+    }
+
+    /// Wrapper so "no station for this song" comes back as a decodable
+    /// object rather than a bare top-level null, which `call<T>` rejects.
+    private struct AutoplayStationResult: Decodable {
+        let station: Station?
+    }
+
     /// Removes one item from the live queue. Uses `MusicKit.Queue.remove(index)`
     /// where the running MusicKit JS build has it (no rebuild, no interruption),
     /// falling back to a queue rebuild otherwise — see the JS side.
