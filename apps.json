@@ -13,13 +13,13 @@
       "category": "music",
       "versions": [
         {
-          "version": "1.0.49",
-          "buildVersion": "49",
-          "date": "2026-09-07T17:48:23Z",
-          "size": 1171290,
+          "version": "1.0.50",
+          "buildVersion": "50",
+          "date": "2026-09-07T18:06:28Z",
+          "size": 1193614,
           "minOSVersion": "17.0",
           "downloadURL": "https://github.com/n-popescu/AppleMusic/releases/download/v1.0.0/Lucent-1.0.0-unsigned.ipa",
-          "localizedDescription": "Build 49 (commit b17ca27)"
+          "localizedDescription": "Build 50 (commit c2a1863)"
         }
       ]
     }
